@@ -82,10 +82,13 @@ if(COMPILER_OPT_HIDDEN_SUPPORTED)
     target_compile_options(percolation PUBLIC "-fvisibility=hidden")
 endif()
 
-if("${CMAKE_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_COMPILER_ID}" STREQUAL "GNU")
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     target_compile_options(percolation PUBLIC
         -m64 -mmmx -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2 -mavx
         -mtune=native)
+else()
+    message(STATUS "[percolation] Compiler ${CMAKE_CXX_COMPILER_ID} is not "
+                   "(yet) supported. You are likely to run into trouble.")
 endif()
 
 add_executable(main src/main.cpp)
@@ -93,5 +96,4 @@ target_link_libraries(main PRIVATE percolation)
 
 install(TARGETS percolation
         LIBRARY
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/percolation
-        CONFIGURATIONS Release)
+        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/percolation)
