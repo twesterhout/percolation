@@ -55,8 +55,10 @@ IncludeCategories:
     Priority:        1
   - Regex:           '^<(boost|gsl|spdlog|tl)'
     Priority:        4
-  - Regex:           '^<'
+  - Regex:           '^<.*\.h>$'
     Priority:        5
+  - Regex:           '^<'
+    Priority:        6
   - Regex:           '.*'
     Priority:        2
 IncludeIsMainRegex: '$'
