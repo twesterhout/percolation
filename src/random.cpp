@@ -47,27 +47,51 @@ inline auto seed_engine()
 }
 } // namespace
 
-TCM_NOINLINE
 auto random_generator() noexcept -> random_generator_t&
 {
     static thread_local auto generator = seed_engine();
     return generator;
 }
 
+/// Functor for destroying `VSLStreamStatePtr`s.
+struct vsl_stream_deleter_t {
+    auto operator()(VSLStreamStatePtr p) const noexcept
+    {
+        TCM_ASSERT(p != nullptr, "Trying to delete a nullptr");
+        // TODO(twesterhout): Yeah, I know, ignoring the error code is not a
+        // great idea, but we can't do anything about the errors anyway.
+        vslDeleteStream(&p);
+    }
+};
+
+/// Function to guard against the case when VSLStreamStatePtr is not a pointer.
+///
+/// In that case, rather than failing with a weird error message, we trigger a
+/// static assertion failure with an explanation of the problem.
+template <class _Dummy1 = void, class = void,
+          class = typename std::enable_if<
+              std::is_same<_Dummy1, _Dummy1>::value
+              && !std::is_pointer<VSLStreamStatePtr>::value>::type>
+auto make_rng_stream(MKL_INT /*unused*/, MKL_UINT /*unused*/) -> void
+{
+    static_assert(std::is_pointer<VSLStreamStatePtr>::value,
+                  "It is assumed that `VSLStreamStatePtr` is a pointer (most "
+                  "likely a `void *`).");
+}
+
+template <class _Dummy1 = void,
+          class         = typename std::enable_if<
+              std::is_same<_Dummy1, _Dummy1>::value
+              && std::is_pointer<VSLStreamStatePtr>::value>::type>
 auto make_rng_stream(MKL_INT const method, MKL_UINT const seed)
-    -> std::unique_ptr<VSLStreamStatePtr, vsl_stream_deleter_t>
+    -> std::unique_ptr<std::remove_pointer<VSLStreamStatePtr>::type,
+                       vsl_stream_deleter_t>
 {
     VSLStreamStatePtr stream;
     auto const        status = vslNewStream(&stream, method, seed);
     if (status == VSL_STATUS_OK) {
-        try {
-            return std::unique_ptr<VSLStreamStatePtr, vsl_stream_deleter_t>{
-                new VSLStreamStatePtr{stream}};
-        }
-        catch (std::bad_alloc& /*unused*/) {
-            vsl_stream_deleter_t{}(&stream);
-            throw;
-        }
+        return std::unique_ptr<std::remove_pointer<VSLStreamStatePtr>::type,
+                               vsl_stream_deleter_t>{stream};
     }
 
     char const* const msg = [](auto code) {
@@ -86,11 +110,24 @@ auto make_rng_stream(MKL_INT const method, MKL_UINT const seed)
     throw std::runtime_error{msg};
 }
 
-auto make_rng_stream(MKL_INT const method)
-    -> std::unique_ptr<VSLStreamStatePtr, vsl_stream_deleter_t>
+TCM_EXPORT auto random_stream() -> VSLStreamStatePtr
 {
-    std::random_device urandom;
-    return make_rng_stream(method, urandom());
+    auto const get_seed = []() {
+        std::random_device rd;
+        return rd();
+    };
+    thread_local auto vsl_stream = make_rng_stream(VSL_BRNG_ARS5, get_seed());
+    return vsl_stream.get();
+}
+
+auto enumerate_sites(size_t const n)
+    -> std::unique_ptr<int32_t[], free_deleter_t>
+{
+    auto sites = make_buffer_of<int32_t>(n);
+    for (auto i = 0; i < n; ++i) {
+        sites[static_cast<size_t>(i)] = i;
+    }
+    return sites;
 }
 
 TCM_NAMESPACE_END
