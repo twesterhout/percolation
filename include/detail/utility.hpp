@@ -38,13 +38,18 @@
 
 TCM_NAMESPACE_BEGIN
 
-struct FreeDeleter {
-    template <class T> auto operator()(T* p) const noexcept
+using std::int32_t;
+using std::size_t;
+
+struct free_deleter_t {
+    template <class T> auto operator()(T* p) const noexcept -> void
     {
         TCM_ASSERT(p != nullptr, "Trying to delete a nullptr.");
         std::free(p);
     }
 };
+
+using FreeDeleter = free_deleter_t;
 
 template <class T, std::size_t Alignment = 64>
 auto make_buffer_of(std::size_t const n) -> std::unique_ptr<T[], FreeDeleter>
@@ -206,7 +211,11 @@ auto random_chirality(Generator& gen) -> chirality_t
 namespace detail {
 template <class T> constexpr inline auto pi = static_cast<T>(M_PI);
 
-constexpr inline float two_pi = 6.2831855f;
+template <class T>
+constexpr inline auto
+    two_pi = static_cast<T>(6.2831853071795864769252867665586666312879240);
+
+// constexpr inline float two_pi = 6.2831855f;
 
 #if 0
 constexpr auto mod12(int const x) noexcept -> int
@@ -231,10 +240,10 @@ struct angle_t {
   public:
     constexpr explicit angle_t(float const angle = 0) noexcept : _raw{angle}
     {
-        if (angle < 0 || angle >= detail::two_pi) {
-            std::fprintf(stderr, "angle_t{%f}\n", static_cast<double>(angle));
-        }
-        TCM_ASSERT((0 <= angle && angle < detail::two_pi),
+        // if (angle < 0 || angle >= detail::two_pi) {
+        //     std::fprintf(stderr, "angle_t{%f}\n", static_cast<double>(angle));
+        // }
+        TCM_ASSERT((0 <= angle && angle < detail::two_pi<float>),
                    "Angle out of domain");
     }
 
@@ -260,8 +269,8 @@ struct angle_t {
     friend auto operator+(angle_t const& x, angle_t const& y) noexcept
         -> angle_t
     {
-        using detail::two_pi;
-        auto const result = x._raw + y._raw;
+        constexpr auto two_pi = detail::two_pi<float>;
+        auto const     result = x._raw + y._raw;
         return angle_t{result - (result >= two_pi) * two_pi};
     }
 
@@ -274,7 +283,7 @@ struct angle_t {
     friend auto operator-(angle_t const& x, angle_t const& y) noexcept
         -> angle_t
     {
-        using detail::two_pi;
+        constexpr auto two_pi  = detail::two_pi<float>;
         constexpr auto epsilon = -4.7683716E-7f;
         auto const     result  = x._raw - y._raw;
         if (result < epsilon) { return angle_t{result + two_pi}; }
@@ -298,7 +307,7 @@ template <class Generator> auto random_angle(Generator& g) -> angle_t
     using Dist   = std::uniform_real_distribution<float>;
     using Params = Dist::param_type;
     Dist urd;
-    return angle_t{urd(g, Params{0.0f, detail::two_pi})};
+    return angle_t{urd(g, Params{0.0f, detail::two_pi<float>})};
 }
 
 #if 0

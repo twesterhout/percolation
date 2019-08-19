@@ -48,83 +48,107 @@ template <class System> class geometric_cluster_t { // {{{
     system_type&        _system_state; ///< The system
 
   public:
-    /// Creates a one-site geometric cluster consisting of a single magnetic
-    /// cluster.
+    /// Creates a one-site geometric cluster.
     ///
     /// This function automatically calls `on_*` functions of #tcm_system_t
     /// notifying it that a new cluster has been created.
     ///
     /// \param site       Index of the site.
-    /// \param boundaries Which boundaries `site` touches. It it a bit-mask
+    /// \param boundaries Which boundaries `site` touches. It is a bit-mask
     ///                   built by xor'ing values of type #tcm_bounrary_t.
-    /// \param phase      Orientation of the spin. This value should probably be
+    /// \param phase      Orientation of the spin. This value is typically
     ///                   chosen randomly.
     /// \param system     Reference to the global system state.
     ///
-    /// \note May throw if memory allocation fails.
+    /// \throws std::bad_alloc If memory allocation fails.
     inline geometric_cluster_t(size_t site, int boundaries, angle_t phase,
                                system_type& system);
 
-    geometric_cluster_t(geometric_cluster_t const&)     = delete;
+    /// **Deleted** copy constructor.
+    geometric_cluster_t(geometric_cluster_t const&) = delete;
+    /// **Deleted** move constructor.
     geometric_cluster_t(geometric_cluster_t&&) noexcept = delete;
+    /// **Deleted** copy assignment operator.
     geometric_cluster_t& operator=(geometric_cluster_t const&) = delete;
+    /// **Deleted** move assignment operator.
     geometric_cluster_t& operator=(geometric_cluster_t&&) noexcept = delete;
 
+    /// Destructor which tells the #_system_state that the number of geometric
+    /// clusters should be decreased.
     ~geometric_cluster_t() noexcept
     {
         _system_state.on_cluster_destroyed(*this);
     }
 
+    /// Returns the number of sites in this cluster.
+    ///
+    /// \noexcept
     constexpr auto size() const noexcept { return _size; }
+
+    /// Returns the boundaries bit-mask.
+    ///
+    /// \noexcept
     constexpr auto boundaries() const noexcept { return _boundaries; }
+
+    /// Returns the index of the root site.
+    ///
+    /// \noexcept
     constexpr auto root_index() const noexcept { return _root_index; }
 
   private:
-    /// Inverts the tree such that `cluster` becomes the new root. If `cluster`
-    /// is already root, nothing's done.
+    /// Inverts the tree such that \p cluster becomes the new root. If \p
+    /// cluster is already root, nothing's done.
     ///
     /// \param cluster The new root. It must belong to `*this`.
     auto invert(magnetic_cluster_type& cluster) -> void;
 
   public:
-    /// Merges `other` into `*this`. `edge` is the new edge connecting `*this`
-    /// to `other` (i.e. `edge.first` must belong to `*this` and `edge.second`
-    /// must belong to `other`).
+    /// Merges \p other into `*this`.
     ///
-    /// \note `other` is destroyed in this function! Trying to use the reference
-    /// to it is undefined behaviour.
+    /// \param edge The new edge connecting `*this` to \p other (i.e.
+    ///             `edge.first` must belong to `*this` and `edge.second` must
+    ///             belong to \p other).
+    /// \param other The cluster to merge into `*this`.
+    ///
+    /// \note **\p other is destroyed in this function!** Trying to use the
+    /// reference to it is undefined behaviour.
     inline auto merge(std::pair<size_t, size_t> edge,
                       geometric_cluster_t&      other) -> void;
 
-    inline auto merge(no_optimize_t, std::pair<size_t, size_t> edge,
-                      geometric_cluster_t& other) -> void;
+    // inline auto merge(no_optimize_t, std::pair<size_t, size_t> edge,
+    //                   geometric_cluster_t& other) -> void;
 
-    /// Connects `left` and `right` forming a cycle. All magnetic clusters
-    /// belonging to this cycle are merged into one.
+    /// Connects \p left and \p right forming a cycle in the graph. All magnetic
+    /// clusters belonging to this cycle are merged into one.
     ///
-    /// `left` and `right` must belong to `*this`.
+    /// \p left and \p right must belong to `*this`.
     auto connect(magnetic_cluster_type& left, magnetic_cluster_type& right)
         -> void;
 
-    auto connect(no_optimize_t, magnetic_cluster_type& left,
-                 magnetic_cluster_type& right) -> void;
+    // auto connect(no_optimize_t, magnetic_cluster_type& left,
+    //              magnetic_cluster_type& right) -> void;
 
-    /// First, merges `other` into `*this` and then connects `*edge.first` and
+    /// First, merges \p other into `*this` and then connects `*edge.first` and
     /// `*edge.second`.
+    ///
+    /// This function can be emulated by calling merge() followed by connect().
+    /// However, here we know that `*edge.first` belongs to `*this` and
+    /// `*edge.second` belongs to \p other which eliminates the costly
+    /// find_lca() call in connect().
     inline auto
     merge_and_connect(std::pair<gsl::not_null<magnetic_cluster_type*>,
                                 gsl::not_null<magnetic_cluster_type*>>
                                            edge,
                       geometric_cluster_t& other) -> void;
 
-    inline auto
-    merge_and_connect(no_optimize_t,
-                      std::pair<gsl::not_null<magnetic_cluster_type*>,
-                                gsl::not_null<magnetic_cluster_type*>>
-                                           edge,
-                      geometric_cluster_t& other) -> void;
+    // inline auto
+    // merge_and_connect(no_optimize_t,
+    //                   std::pair<gsl::not_null<magnetic_cluster_type*>,
+    //                             gsl::not_null<magnetic_cluster_type*>>
+    //                                        edge,
+    //                   geometric_cluster_t& other) -> void;
 
-    auto optimize_full() -> void;
+    // auto optimize_full() -> void;
 
     auto rotate(angle_t const delta_angle) { _root->rotate(delta_angle); }
 }; // }}}
@@ -153,18 +177,19 @@ auto geometric_cluster_t<System>::invert(magnetic_cluster_type& new_root)
     if (new_root.is_root()) { return; }
 
     // Constructs the full paths to the root.
-    auto const find_path_to_root = [this](auto node) {
-        std::stack<size_t, std::vector<size_t>> path;
-        while (!node->is_root()) {
-            path.push(node->index_in_parent());
-            node = node->parent();
-        }
-        TCM_ASSERT(node->is_root(), "");
-        TCM_ASSERT(node == _root.get(), "");
-        return path;
-    };
-    auto path = find_path_to_root(
-        gsl::not_null<magnetic_cluster_type*>{std::addressof(new_root)});
+    auto const find_path_to_root =
+        [this](gsl::not_null<magnetic_cluster_type const*> node) {
+            using vector_type = boost::container::small_vector<size_t, 64>;
+            std::stack<size_t, vector_type> path;
+            while (!node->is_root()) {
+                path.push(node->index_in_parent());
+                node = node->parent();
+            }
+            TCM_ASSERT(node->is_root(), "");
+            TCM_ASSERT(node == _root.get(), "");
+            return path;
+        };
+    auto path = find_path_to_root({&new_root});
     while (!path.empty()) {
         _root = move_root_down<System>(std::move(_root), path.top());
         path.pop();
@@ -187,17 +212,6 @@ geometric_cluster_t<System>::merge(std::pair<size_t, size_t> edge,
     TCM_ASSERT(&_system_state.get_geometric_cluster(other_cluster) == &other,
                "");
     other.invert(other_cluster);
-    auto const delta_angle = [system =
-                                  std::cref(_system_state)](auto i, auto j) {
-        auto const angle_i = system.get().get_angle(i);
-        auto const angle_j = system.get().get_angle(j);
-        switch (::TCM_NAMESPACE::interaction(system.get().lattice(), i, j)) {
-        case interaction_t::Ferromagnetic: return angle_i - angle_j;
-        case interaction_t::Antiferromagnetic:
-            return angle_i - angle_j + angle_t{detail::pi<float>};
-        } // end switch
-    }(this_site, other_site);
-    other.rotate(delta_angle);
 
     // Attach it to `*this`.
     this_cluster.attach({edge, std::move(other._root)});
@@ -210,9 +224,11 @@ geometric_cluster_t<System>::merge(std::pair<size_t, size_t> edge,
     // Update global statistics
     _system_state.on_size_changed(*this)
         .on_boundaries_changed(*this)
+        // NOTE: This call destroys `other`
         .on_cluster_merged(*this, other);
 }
 
+#if 0
 template <class System>
 TCM_FORCEINLINE auto
 geometric_cluster_t<System>::merge(no_optimize_t /*unused*/,
@@ -242,6 +258,7 @@ geometric_cluster_t<System>::merge(no_optimize_t /*unused*/,
         .on_boundaries_changed(*this)
         .on_cluster_merged(*this, other);
 }
+#endif
 
 template <class System>
 TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
@@ -272,6 +289,7 @@ TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
         .on_cluster_merged(*this, other);
 }
 
+#if 0
 template <class System>
 TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
     no_optimize_t,
@@ -302,6 +320,7 @@ TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
         .on_boundaries_changed(*this)
         .on_cluster_merged(*this, other);
 }
+#endif
 
 namespace detail {
 template <class System>
@@ -401,19 +420,17 @@ auto geometric_cluster_t<System>::connect(magnetic_cluster_type& left,
                                           magnetic_cluster_type& right) -> void
 {
     auto [common, path_left, path_right] = find_lca(left, right);
-
     while (!path_left.empty()) {
-        common->merge(no_optimize, std::move(path_left.back()));
+        common->merge(std::move(path_left.back()));
         path_left.pop_back();
     }
     while (!path_right.empty()) {
-        common->merge(no_optimize, std::move(path_right.back()));
+        common->merge(std::move(path_right.back()));
         path_right.pop_back();
     }
-
-    common->optimize_full();
 }
 
+#if 0
 template <class System>
 auto geometric_cluster_t<System>::connect(no_optimize_t,
                                           magnetic_cluster_type& left,
@@ -430,12 +447,15 @@ auto geometric_cluster_t<System>::connect(no_optimize_t,
         path_right.pop_back();
     }
 }
+#endif
 
+#if 0
 template <class System>
 auto geometric_cluster_t<System>::optimize_full() -> void
 {
     _root->dfs([](auto& x) { x.optimize_full(); });
 }
+#endif
 
 // }}}
 

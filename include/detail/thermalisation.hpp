@@ -29,8 +29,9 @@
 #pragma once
 
 #include "detail/lattice.hpp"
+#include "detail/magnetic_cluster.hpp"
+#include "detail/simulated_annealing.hpp"
 #include "detail/utility.hpp"
-#include "gensa.hpp"
 #include <boost/align/aligned_allocator.hpp>
 #include <gsl/gsl-lite.hpp>
 #include <sleef.h>
@@ -64,6 +65,7 @@ struct to_0_2pi_fn {
     }
 };
 
+#if 0
 /// Performs the actual computation of energy
 ///
 /// NOTE: Uses AVX intrinsics.
@@ -148,18 +150,116 @@ inline auto energy_kernel(
     return energy[0] + energy[1] + energy[2] + energy[3] + energy[4] + energy[5]
            + energy[6] + energy[7] - static_cast<float>(rest);
 } // }}}
+#endif
+
+inline auto
+energy_kernel(gsl::span<float const> const                         spin,
+              gsl::span<std::pair<unsigned, unsigned> const> const edges,
+              gsl::span<float const> const coeffs) TCM_NOEXCEPT -> float
+{ // {{{
+    auto const load_chunk = [s = spin, d = edges](auto const n)
+                                TCM_NOEXCEPT -> __m256 {
+        TCM_ASSERT(8 * (n + 1) <= d.size(), "Index out of bounds");
+        auto const i = 8 * n;
+        auto const x = _mm256_set_ps(s[d[i + 7].first], s[d[i + 6].first],
+                                     s[d[i + 5].first], s[d[i + 4].first],
+                                     s[d[i + 3].first], s[d[i + 2].first],
+                                     s[d[i + 1].first], s[d[i + 0].first]);
+        auto const y = _mm256_set_ps(s[d[i + 7].second], s[d[i + 6].second],
+                                     s[d[i + 5].second], s[d[i + 4].second],
+                                     s[d[i + 3].second], s[d[i + 2].second],
+                                     s[d[i + 1].second], s[d[i + 0].second]);
+        return _mm256_sub_ps(x, y);
+    };
+
+    auto const load_part = [s = spin, d = edges](auto const n, auto const rest)
+                               TCM_NOEXCEPT -> __m256 {
+        TCM_ASSERT(0 < rest && rest < 8, "Precondition violated");
+        TCM_ASSERT(8 * n + rest <= d.size(), "Index out of bounds");
+        auto const i = 8 * n;
+        switch (rest) {
+        case 1:
+            return _mm256_set_ps(0, 0, 0, 0, 0, 0, 0, //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        case 2:
+            return _mm256_set_ps(0, 0, 0, 0, 0, 0,                       //
+                                 s[d[i + 1].first] - s[d[i + 1].second], //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        case 3:
+            return _mm256_set_ps(0, 0, 0, 0, 0,                          //
+                                 s[d[i + 2].first] - s[d[i + 2].second], //
+                                 s[d[i + 1].first] - s[d[i + 1].second], //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        case 4:
+            return _mm256_set_ps(0, 0, 0, 0,                             //
+                                 s[d[i + 3].first] - s[d[i + 3].second], //
+                                 s[d[i + 2].first] - s[d[i + 2].second], //
+                                 s[d[i + 1].first] - s[d[i + 1].second], //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        case 5:
+            return _mm256_set_ps(0, 0, 0,                                //
+                                 s[d[i + 4].first] - s[d[i + 4].second], //
+                                 s[d[i + 3].first] - s[d[i + 3].second], //
+                                 s[d[i + 2].first] - s[d[i + 2].second], //
+                                 s[d[i + 1].first] - s[d[i + 1].second], //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        case 6:
+            return _mm256_set_ps(0, 0,                                   //
+                                 s[d[i + 5].first] - s[d[i + 5].second], //
+                                 s[d[i + 4].first] - s[d[i + 4].second], //
+                                 s[d[i + 3].first] - s[d[i + 3].second], //
+                                 s[d[i + 2].first] - s[d[i + 2].second], //
+                                 s[d[i + 1].first] - s[d[i + 1].second], //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        case 7:
+            return _mm256_set_ps(0,                                      //
+                                 s[d[i + 6].first] - s[d[i + 6].second], //
+                                 s[d[i + 5].first] - s[d[i + 5].second], //
+                                 s[d[i + 4].first] - s[d[i + 4].second], //
+                                 s[d[i + 3].first] - s[d[i + 3].second], //
+                                 s[d[i + 2].first] - s[d[i + 2].second], //
+                                 s[d[i + 1].first] - s[d[i + 1].second], //
+                                 s[d[i + 0].first] - s[d[i + 0].second]);
+        default: TCM_ASSERT(false, "Bug! This should never have happened.");
+        } // end switch
+    };
+
+    constexpr auto vector_size = 8;
+    auto const     chunks      = edges.size() / vector_size;
+    auto const     rest        = edges.size() % vector_size;
+
+    auto energy = _mm256_set1_ps(0.0f);
+    for (auto i = size_t{0}; i < chunks; ++i) {
+        energy += _mm256_mul_ps(_mm256_load_ps(coeffs.data() + i * vector_size),
+                                Sleef_cosf8_u35avx(load_chunk(i)));
+    }
+    auto energy_rest = 0.0f;
+    if (rest != 0) {
+        auto const begin = chunks * vector_size;
+        auto const end   = begin + rest;
+        for (auto i = begin; i < end; ++i) {
+            energy_rest +=
+                coeffs[i]
+                * Sleef_cosf_u35(spin[edges[i].first] - spin[edges[i].second]);
+        }
+    }
+    return energy[0] + energy[1] + energy[2] + energy[3] + energy[4] + energy[5]
+           + energy[6] + energy[7] + energy_rest;
+} // }}}
 } // namespace detail
 
+#if 0
 struct energy_buffers_t {
 
     struct energy_fn_type {
-        gsl::span<std::pair<size_t, size_t> const> fm_edges;
-        gsl::span<std::pair<size_t, size_t> const> afm_edges;
+        gsl::span<std::pair<unsigned, unsigned> const> edges;
+        gsl::span<float const>                         coeffs;
+        unsigned                                       number_sites;
 
         auto operator()(gsl::span<float const> const spin) TCM_NOEXCEPT -> float
         {
-            return detail::energy_kernel(spin, afm_edges)
-                   - detail::energy_kernel(spin, fm_edges);
+            TCM_ASSERT(spin.size() == number_sites, "");
+            return detail::energy_kernel(spin, edges, coeffs);
         }
     };
 
@@ -168,22 +268,19 @@ struct energy_buffers_t {
     using buffer_type =
         std::vector<T, boost::alignment::aligned_allocator<T, PAGE_SIZE>>;
 
-    static constexpr auto empty = std::numeric_limits<size_t>::max();
+    static constexpr auto empty = std::numeric_limits<unsigned>::max();
 
-    buffer_type<size_t> _g_to_l; ///< Mapping of global to local indices.
-                                 ///<
-    buffer_type<std::pair<size_t, size_t>>
-        _fm_edges; ///< Edges (specified in local indices) between
-                   ///< sites with ferromagnetic interaction
-    buffer_type<std::pair<size_t, size_t>>
-        _afm_edges; ///< Edges (specified in local indices) between
-                    ///< sites with antiferromagnetic interaction
+    buffer_type<unsigned> _g_to_l; ///< Mapping of global to local indices.
+    buffer_type<std::pair<unsigned, unsigned>>
+                       _edges;  ///< Edges (given in terms of local indices)
+    buffer_type<float> _coeffs; ///< Couplings (+1 for antiferromagnetic
+                                ///< connections and -1 for ferromagnetic ones)
 
   public:
     explicit energy_buffers_t(size_t const size)
         : _g_to_l(size)
-        , _fm_edges(size)  // NOTE: This is just an initial estimate
-        , _afm_edges(size) // And this as well
+        , _edges(size)  // NOTE: This is just an initial estimate
+        , _coeffs(size) // And this as well
     {}
 
     energy_buffers_t(const energy_buffers_t&)     = delete;
@@ -191,9 +288,12 @@ struct energy_buffers_t {
     energy_buffers_t& operator=(energy_buffers_t const&) = delete;
     energy_buffers_t& operator=(energy_buffers_t&&) noexcept = default;
 
-    template <class Lattice>
-    auto energy_fn(gsl::span<size_t const> sites, Lattice const& lattice)
-        -> energy_fn_type;
+    template <class System>
+    auto energy_fn(System const& system) -> energy_fn_type;
+
+  private:
+    template <class System>
+    auto set_initial_state(sa_buffers_t const& sa_buffers) -> energy_fn_type;
 
     auto global_to_local(size_t const i) const TCM_NOEXCEPT -> size_t
     {
@@ -202,7 +302,9 @@ struct energy_buffers_t {
         return _g_to_l[i];
     }
 };
+#endif
 
+#if 0
 // {{{ energy_buffers_t::energy_fn IMPLEMENTATION
 template <class Lattice>
 TCM_NOINLINE auto energy_buffers_t::energy_fn(gsl::span<size_t const> sites,
@@ -251,8 +353,257 @@ TCM_NOINLINE auto energy_buffers_t::energy_fn(gsl::span<size_t const> sites,
 
     return {{_fm_edges}, {_afm_edges}};
 }
-// }}}
+#endif
 
+#if 0
+template <class System>
+TCM_NOINLINE auto energy_buffers_t::energy_fn(System const& system)
+    -> energy_fn_type
+{
+    using std::begin, std::end;
+
+    auto const& lattice = system.lattice();
+    if (::TCM_NAMESPACE::size(system.lattice()) != _g_to_l.size()) {
+        _g_to_l.resize(::TCM_NAMESPACE::size(lattice));
+    }
+    std::fill(begin(_g_to_l), end(_g_to_l), empty);
+    _edges.clear();
+    _coeffs.clear();
+
+    auto number_sites = unsigned{0};
+    for (auto i = size_t{0}; i < ::TCM_NAMESPACE::size(lattice); ++i) {
+        if (!system.is_empty(i)) {
+            for (auto const _j : ::TCM_NAMESPACE::neighbours(lattice, i)) {
+                if (_j >= 0) {
+                    auto const j = static_cast<size_t>(_j);
+                    if (!system.is_empty(j)
+                        && system.get_magnetic_cluster(i)
+                               == system.get_magnetic_cluster(j)) {
+                        if (_g_to_l[i] == empty) {
+                            _g_to_l[i] = number_sites++;
+                        }
+                        if (j < i) {
+                            TCM_ASSERT(
+                                _g_to_l[j] != empty && _g_to_l[i] != empty, "");
+                            _coeffs.emplace_back(
+                                ::TCM_NAMESPACE::coupling(lattice, j, i));
+                            _edges.emplace_back(_g_to_l[j], _g_to_l[i]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return {{_edges}, {_coeffs}, number_sites};
+}
+// }}}
+#endif
+
+struct thermaliser_t {
+
+    struct energy_fn_type {
+        gsl::span<std::pair<unsigned, unsigned> const> edges;
+        gsl::span<float const>                         coeffs;
+        size_t                                         number_sites;
+
+        auto operator()(gsl::span<float const> const spin) TCM_NOEXCEPT -> float
+        {
+            TCM_ASSERT(spin.size() == number_sites, "");
+            return detail::energy_kernel(spin, edges, coeffs);
+        }
+    };
+
+  private:
+    template <class T>
+    using buffer_type =
+        std::vector<T, boost::alignment::aligned_allocator<T, PAGE_SIZE>>;
+
+    static constexpr auto empty = std::numeric_limits<unsigned>::max();
+
+    sa_buffers_t          _sa_buffers; ///< Simulated Annealing buffers.
+    buffer_type<unsigned> _l_to_g; ///< Mapping from local to global indices.
+    buffer_type<unsigned> _g_to_l; ///< Mapping from global to local indices.
+    buffer_type<std::pair<unsigned, unsigned>>
+                       _edges;  ///< Edges (given in terms of local indices)
+    buffer_type<float> _coeffs; ///< Couplings (+1 for antiferromagnetic
+                                ///< connections and -1 for ferromagnetic ones)
+
+  public:
+    explicit thermaliser_t(size_t const size)
+        : _sa_buffers{size}
+        , _l_to_g(size)
+        , _g_to_l(size)
+        , _edges(size)  // NOTE: This is just an initial estimate
+        , _coeffs(size) // And this as well
+    {}
+
+    thermaliser_t(const thermaliser_t&)     = delete;
+    thermaliser_t(thermaliser_t&&) noexcept = default;
+    thermaliser_t& operator=(thermaliser_t const&) = delete;
+    thermaliser_t& operator=(thermaliser_t&&) noexcept = default;
+
+    template <class System>
+    TCM_NOINLINE auto thermalise(magnetic_cluster_t<System>& cluster,
+                                 sa_pars_t const& parameters) -> void;
+
+    template <class System>
+    TCM_NOINLINE auto thermalise(System& system, sa_pars_t const& parameters)
+        -> void;
+
+  private:
+    template <class System>
+    TCM_NOINLINE auto reset(System const& system) -> void;
+
+    template <class System>
+    TCM_NOINLINE auto reset(magnetic_cluster_t<System> const& cluster) -> void;
+
+    template <class System>
+    TCM_NOINLINE auto store(gsl::span<float const>      best,
+                            magnetic_cluster_t<System>& cluster) -> void;
+
+    template <class System>
+    TCM_NOINLINE auto store(gsl::span<float const> best, System& system)
+        -> void;
+};
+
+template <class System>
+auto thermaliser_t::thermalise(magnetic_cluster_t<System>& cluster,
+                               sa_pars_t const&            parameters) -> void
+{
+    reset(cluster);
+    auto&      system    = cluster.system();
+    auto       energy_fn = energy_fn_type{{_edges}, {_coeffs}, _l_to_g.size()};
+    auto       wrap_fn   = detail::to_0_2pi_fn{};
+    sa_chain_t chain{_sa_buffers, parameters, energy_fn, wrap_fn,
+                     system.rng_stream()};
+    for (auto i = 0u; i < parameters.n; ++i) {
+        chain();
+    }
+    store(chain.best(), system);
+}
+
+template <class System>
+auto thermaliser_t::thermalise(System& system, sa_pars_t const& parameters)
+    -> void
+{
+    reset(system);
+    auto       energy_fn = energy_fn_type{{_edges}, {_coeffs}, _l_to_g.size()};
+    auto       wrap_fn   = detail::to_0_2pi_fn{};
+    sa_chain_t chain{_sa_buffers, parameters, energy_fn, wrap_fn,
+                     system.rng_stream()};
+    for (auto i = 0u; i < parameters.n; ++i) {
+        chain();
+    }
+    store(chain.best(), system);
+}
+
+template <class System>
+auto thermaliser_t::reset(magnetic_cluster_t<System> const& cluster) -> void
+{
+    auto const& system  = cluster.system();
+    auto const& lattice = system.lattice();
+    if (::TCM_NAMESPACE::size(lattice) != _g_to_l.size()) {
+        _g_to_l.resize(::TCM_NAMESPACE::size(lattice));
+    }
+    std::fill(begin(_g_to_l), end(_g_to_l), empty);
+    _l_to_g.clear();
+    _edges.clear();
+    _coeffs.clear();
+
+    for (auto const i : cluster.sites()) {
+        if (!system.is_empty(i)) {
+            for (auto const _j : ::TCM_NAMESPACE::neighbours(lattice, i)) {
+                if (_j >= 0) {
+                    auto const j = static_cast<unsigned>(_j);
+                    if (!system.is_empty(j)
+                        && (&system.get_magnetic_cluster(j) == &cluster)) {
+                        if (_g_to_l[i] == empty) {
+                            _g_to_l[i] = static_cast<unsigned>(_l_to_g.size());
+                            _l_to_g.push_back(i);
+                        }
+                        if (j < i) {
+                            TCM_ASSERT(
+                                _g_to_l[j] != empty && _g_to_l[i] != empty, "");
+                            _coeffs.push_back(
+                                ::TCM_NAMESPACE::coupling(lattice, j, i));
+                            _edges.emplace_back(_g_to_l[j], _g_to_l[i]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    _sa_buffers.resize(_l_to_g.size());
+    auto initial = _sa_buffers.current();
+    for (auto const i : _l_to_g) {
+        initial[i] = system.get_angle(i);
+    }
+}
+
+template <class System> auto thermaliser_t::reset(System const& system) -> void
+{
+    auto const& lattice = system.lattice();
+    if (::TCM_NAMESPACE::size(lattice) != _g_to_l.size()) {
+        _g_to_l.resize(::TCM_NAMESPACE::size(lattice));
+    }
+    std::fill(begin(_g_to_l), end(_g_to_l), empty);
+    _l_to_g.clear();
+    _edges.clear();
+    _coeffs.clear();
+
+    for (auto i = 0u; i < ::TCM_NAMESPACE::size(lattice); ++i) {
+        if (!system.is_empty(i)) {
+            for (auto const _j : ::TCM_NAMESPACE::neighbours(lattice, i)) {
+                if (_j >= 0) {
+                    auto const j = static_cast<unsigned>(_j);
+                    if (!system.is_empty(j)
+                        && system.get_magnetic_cluster(i)
+                               == system.get_magnetic_cluster(j)) {
+                        if (_g_to_l[i] == empty) {
+                            _g_to_l[i] = static_cast<unsigned>(_l_to_g.size());
+                            _l_to_g.push_back(i);
+                        }
+                        if (j < i) {
+                            TCM_ASSERT(
+                                _g_to_l[j] != empty && _g_to_l[i] != empty, "");
+                            _coeffs.push_back(
+                                ::TCM_NAMESPACE::coupling(lattice, j, i));
+                            _edges.emplace_back(_g_to_l[j], _g_to_l[i]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    _sa_buffers.resize(_l_to_g.size());
+    auto initial = _sa_buffers.current();
+    for (auto const i : _l_to_g) {
+        initial[i] = system.get_angle(i);
+    }
+}
+
+template <class System>
+auto thermaliser_t::store(gsl::span<float const>      best,
+                          magnetic_cluster_t<System>& cluster) -> void
+{
+    auto const& system = cluster.system();
+    for (auto i = 0u; i < _l_to_g.size(); ++i) {
+        system.set_angle(_l_to_g[i], angle_t{best[i]});
+    }
+}
+
+template <class System>
+auto thermaliser_t::store(gsl::span<float const> best, System& system) -> void
+{
+    for (auto i = 0u; i < _l_to_g.size(); ++i) {
+        system.set_angle(_l_to_g[i], angle_t{best[i]});
+    }
+}
+
+#if 0
 template <class EnergyFn, class InitFn>
 inline auto optimise(EnergyFn&& energy, sa_pars_t const& parameters,
                      sa_buffers_t& buffers, VSLStreamStatePtr stream,
@@ -266,5 +617,6 @@ inline auto optimise(EnergyFn&& energy, sa_pars_t const& parameters,
     }
     return chain.best();
 }
+#endif
 
 TCM_NAMESPACE_END

@@ -30,15 +30,14 @@ auto convolution(std::int64_t const             n_max,
     }
 
     auto const add_to_result =
-        [&results, fns = state.functions ](auto const n, auto const B) noexcept
-    {
-        for (std::size_t i = 0; i < Count; ++i) {
-            results[i] += B * fns[i][n];
-        }
-        for (auto const r : results) {
-            TCM_ASSERT(!std::isnan(r), "Results must not be NaNs");
-        }
-    };
+        [&results, fns = state.functions](auto const n, auto const B) noexcept {
+            for (std::size_t i = 0; i < Count; ++i) {
+                results[i] += B * fns[i][n];
+            }
+            for (auto const r : results) {
+                TCM_ASSERT(!std::isnan(r), "Results must not be NaNs");
+            }
+        };
     std::int64_t const N = state.number_sites;
 
     // Postulate that B(N, n_max, p) = 1
@@ -126,9 +125,5 @@ extern "C" TCM_EXPORT int tcm_convolution(int64_t const                  n_min,
         }
         return 0;
     default: return EDOM;
-    };
+    } // end switch
 }
-
-
-
-

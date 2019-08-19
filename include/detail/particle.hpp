@@ -40,10 +40,9 @@ template <class> class geometric_cluster_t;
 struct from_parent_index_t {};
 constexpr from_parent_index_t from_parent_index{};
 
-/// A light-weight variant<index, owner<geometric_cluster>> built on
+/// A lightweight variant<index, owner<geometric_cluster>> built on
 /// top of intptr_t.
-template <class System>
-union particle_t { // {{{
+template <class System> union particle_t { // {{{
     static_assert(sizeof(void*) == sizeof(std::intptr_t),
                   "What kind of system is this?");
 
@@ -51,8 +50,8 @@ union particle_t { // {{{
     using unique_ptr   = typename System::template unique_ptr<cluster_type>;
 
     struct child_data_t {
-        std::size_t parent_index;
-        void*       dummy;
+        size_t parent_index;
+        void*  dummy;
     };
 
     static_assert(sizeof(child_data_t) == sizeof(unique_ptr));
@@ -73,6 +72,7 @@ union particle_t { // {{{
     }
 
   public:
+    /// Swaps two particles.
     friend constexpr auto swap(particle_t& left, particle_t& right) noexcept
         -> void
     {
@@ -81,35 +81,49 @@ union particle_t { // {{{
         right._child    = temp;
     }
 
+    /// Returns whether the site is empty.
+    ///
+    /// \noexcept
     constexpr auto is_empty() const noexcept
     {
         return _child.parent_index == empty_value && _child.dummy == nullptr;
     }
+
+    /// Returns whether the site is the root of a geometric cluster.
+    ///
+    /// \noexcept
     constexpr auto is_root() const noexcept { return _child.dummy != nullptr; }
+
+    /// Returns whether the site has a parent.
     constexpr auto is_child() const noexcept { return _child.dummy == nullptr; }
 
   private:
+    /// If root, destroys the geometric cluster and does nothing otherwise.
     constexpr auto destroy() noexcept -> void
     {
         if (is_root()) { _cluster.~unique_ptr(); }
-#if 0
-        if (is_root()) {
-            auto* p = reinterpret_cast<cluster_type*>(-_data);
-            std::default_delete<cluster_type>{}(p);
-            _data = empty_value;
-        }
-#endif
     }
 
   public:
-
+    /// Default constructor.
+    ///
+    /// Creates an empty site.
     constexpr particle_t() noexcept : _child{empty_value, nullptr} {}
+
+    /// **Deleted** copy constructor.
     constexpr particle_t(particle_t const&) = delete;
+    /// **Deleted** copy assignment operator.
     constexpr particle_t& operator=(particle_t const&) = delete;
+    /// Move constructor.
+    ///
+    /// \noexcept
     constexpr particle_t(particle_t&& other) noexcept : particle_t{}
     {
         swap(*this, other);
     }
+    /// Move assignment operator.
+    ///
+    /// \noexcept
     constexpr particle_t& operator=(particle_t&& other) noexcept
     {
         particle_t temp{std::move(other)};
@@ -117,46 +131,69 @@ union particle_t { // {{{
         return *this;
     }
 
+    /// Constructs a new particle given its parent index.
+    ///
+    /// \param parent_index Index of the parent site.
+    /// \noexcept
     explicit constexpr particle_t(from_parent_index_t /*unused*/,
                                   size_t const parent_index) noexcept
         : _child{parent_index, nullptr}
     {
         TCM_ASSERT(parent_index != empty_value, "Bug! This index is reserved");
+        TCM_ASSERT(is_child(), "Postcondition violated");
     }
 
+    /// Constructs a new particle given a geometric cluster.
+    ///
+    /// \pre \p cluster is not `nullptr`.
+    /// \noexcept
     explicit particle_t(unique_ptr cluster) noexcept
         : _cluster{std::move(cluster)}
     {
         TCM_ASSERT(_cluster != nullptr, "`cluster` should not be NULL");
+        TCM_ASSERT(is_root(), "Postcondition violated");
     }
 
     ~particle_t() noexcept { destroy(); }
 
+    /// Returns the index of the parent site.
+    ///
+    /// \pre is_empty() returns `false` and is_child() returns `true`.
+    /// \noexcept
     constexpr auto parent_index() const noexcept -> size_t
     {
-        TCM_ASSERT(!is_empty(), "Non-existant particle has no parent");
+        TCM_ASSERT(!is_empty(), "Non-existent particle has no parent");
         TCM_ASSERT(is_child(), "Only children have parents");
         return _child.parent_index;
     }
 
+    /// Changes the parent of this site.
+    ///
+    /// \pre is_empty() returns `false` and is_child() returns `true`.
+    /// \noexcept
     constexpr auto parent_index(size_t const new_parent) noexcept -> void
     {
-        TCM_ASSERT(!is_empty(), "Non-existant particle can't have a parent");
+        TCM_ASSERT(!is_empty(), "Non-existent particle can't have a parent");
         TCM_ASSERT(is_child(), "Only children have parents.");
         TCM_ASSERT(new_parent != empty_value, "Bug! This index is reserved");
         _child.parent_index = new_parent;
     }
 
+    /// Returns the cluster the particle owns.
+    ///
+    /// \pre is_empty() returns `false` and is_root() returns `true`.
+    /// \noexcept
     auto cluster() const noexcept -> cluster_type const&
     {
-        TCM_ASSERT(!is_empty(), "Non-existant particle owns no clusters");
+        TCM_ASSERT(!is_empty(), "Non-existent particle owns no clusters");
         TCM_ASSERT(is_root(), "Only cluster root nodes store the info.");
         return *_cluster;
     }
 
+    /// \overload
     auto cluster() noexcept -> cluster_type&
     {
-        TCM_ASSERT(!is_empty(), "Non-existant particle owns no clusters");
+        TCM_ASSERT(!is_empty(), "Non-existent particle owns no clusters");
         TCM_ASSERT(is_root(), "Only cluster root nodes store the info.");
         return *_cluster;
     }

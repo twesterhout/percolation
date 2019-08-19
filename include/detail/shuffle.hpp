@@ -29,18 +29,19 @@
 #pragma once
 
 #include "config.h"
+#include <gsl/gsl-lite.hpp>
 #include <random>
 #include <type_traits>
 
 TCM_NAMESPACE_BEGIN
 
 /// Shuffles integers in the range [0, N)
-template <class T, class Generator>
-class shuffler_t {
+template <class T, class Generator> class shuffler_t {
     static_assert(std::is_integral_v<T>,
-        "`tcm::shuffler_t<T, Generator>` currently only supports "
-        "integral `T`s.");
-    static_assert(std::is_same_v<T, std::decay_t<T>>,
+                  "`tcm::shuffler_t<T, Generator>` currently only supports "
+                  "integral `T`s.");
+    static_assert(
+        std::is_same_v<T, std::decay_t<T>>,
         "`tcm::shuffle_t<T, Generator>` requires `T` to be an unqualified "
         "value type.");
 
@@ -56,29 +57,28 @@ class shuffler_t {
       private:
         auto generate_one()
         {
-            TCM_ASSERT(_shuffler != nullptr && _shuffler->_size > _i,
+            TCM_ASSERT(_shuffler != nullptr && _shuffler->_buffer.size() > _i,
                        "There are no more elements to generate.");
-            using Dist   = std::uniform_int_distribution<difference_type>;
+            using Dist   = std::uniform_int_distribution<size_t>;
             using Params = Dist::param_type;
             using std::swap;
-            Dist           uid;
-            std::ptrdiff_t shift =
-                uid(_shuffler->_gen, Params{0, _shuffler->_size - 1 - _i});
+            Dist       uid;
+            auto const shift = uid(
+                _shuffler->_gen, Params{0, _shuffler->_buffer.size() - 1 - _i});
             if (shift != 0) {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-                swap(_shuffler->_data[_i], _shuffler->_data[_i + shift]);
+                swap(_shuffler->_buffer[_i], _shuffler->_buffer[_i + shift]);
             }
         }
 
         explicit Iterator(shuffler_t& obj) : _shuffler{&obj}, _i{0}
         {
-            if (_shuffler->_size > 1) { generate_one(); }
+            if (_shuffler->_buffer.size() > 1) { generate_one(); }
         }
 
-        constexpr Iterator(shuffler_t& obj, difference_type const i) noexcept
+        constexpr Iterator(shuffler_t& obj, size_t const i) noexcept
             : _shuffler{&obj}, _i{i}
         {
-            TCM_ASSERT(i == _shuffler->_size, "Index out of bounds");
+            TCM_ASSERT(i == _shuffler->_buffer.size(), "Index out of bounds");
         }
 
       public:
@@ -90,26 +90,26 @@ class shuffler_t {
 
         constexpr auto operator*() const noexcept -> reference
         {
-            TCM_ASSERT(_shuffler != nullptr && _i < _shuffler->_size,
+            TCM_ASSERT(_shuffler != nullptr && _i < _shuffler->_buffer.size(),
                        "Iterator is not dereferenceable.");
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            return _shuffler->_data[_i];
+            return _shuffler->_buffer[_i];
         }
 
         constexpr auto operator-> () const noexcept -> pointer
         {
-            TCM_ASSERT(_shuffler != nullptr && _i < _shuffler->_size,
+            TCM_ASSERT(_shuffler != nullptr && _i < _shuffler->_buffer.size(),
                        "Iterator is not dereferenceable.");
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            return _shuffler->_data + _i;
+            return _shuffler->_buffer.data() + _i;
         }
 
         auto operator++() -> Iterator&
         {
-            TCM_ASSERT(_shuffler != nullptr && _i < _shuffler->_size,
+            TCM_ASSERT(_shuffler != nullptr && _i < _shuffler->_buffer.size(),
                        "Iterator is not incrementable.");
             ++_i;
-            if (_shuffler->_size > _i) { generate_one(); }
+            if (_shuffler->_buffer.size() > _i) { generate_one(); }
             return *this;
         }
 
@@ -137,8 +137,8 @@ class shuffler_t {
         }
 
       private:
-        shuffler_t*     _shuffler;
-        difference_type _i;
+        shuffler_t* _shuffler;
+        size_t      _i;
     };
 
   public:
@@ -149,29 +149,24 @@ class shuffler_t {
     /// shuffler that is able to iterate through the elements in random order.
     /// `gen` is used for generation of random numbers. It must satisfy the
     /// UniformRandomBitGenerator concept.
-    constexpr shuffler_t(value_type* const data, difference_type const size,
-        Generator& gen) noexcept
-        : _data{data}, _size{size}, _gen{gen}
-    {
-    }
+    constexpr shuffler_t(gsl::span<value_type> buffer, Generator& gen) noexcept
+        : _buffer{buffer}, _gen{gen}
+    {}
 
     constexpr shuffler_t(shuffler_t const&) noexcept = delete;
     constexpr shuffler_t(shuffler_t&&) noexcept      = default;
     constexpr shuffler_t& operator=(shuffler_t const&) noexcept = delete;
     constexpr shuffler_t& operator=(shuffler_t&&) noexcept = default;
 
-    auto begin() noexcept -> Iterator { return Iterator{*this}; }
-    auto end() noexcept -> Iterator { return Iterator{*this, _size}; }
+    constexpr auto begin() noexcept { return Iterator{*this}; }
+    constexpr auto end() noexcept { return Iterator{*this, _buffer.size()}; }
 
   private:
-    // TODO(twesterhout): This should be replaced by span<T>, but I don't want
-    // to add this extra dependency just for this...
-    T*             _data;
-    std::ptrdiff_t _size;
-    Generator&     _gen;
+    gsl::span<T> _buffer;
+    Generator&   _gen;
 };
 
-template class shuffler_t<int, std::mt19937>;
-template class shuffler_t<unsigned, std::mt19937>;
+template <class T, class Generator>
+shuffler_t(gsl::span<T>, Generator&)->shuffler_t<T, Generator>;
 
 TCM_NAMESPACE_END

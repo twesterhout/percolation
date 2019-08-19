@@ -31,7 +31,7 @@
 #include "config.h"
 #include "convolution.h"
 #include "lattice.h"
-#include "tsallis_distribution.h"
+// #include "tsallis_distribution.h"
 #if defined(__cplusplus)
 #    include <cstddef>
 #else

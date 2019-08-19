@@ -29,6 +29,7 @@
 #include "detail/geometric_cluster.hpp"
 #include "detail/lattice.hpp"
 #include "detail/magnetic_cluster.hpp"
+#include "detail/neighbour_stats.hpp"
 #include "detail/particle.hpp"
 #include "detail/random.hpp"
 #include "detail/shuffle.hpp"
@@ -50,248 +51,6 @@ TCM_NAMESPACE_BEGIN
 
 using std::size_t;
 
-template <class MagneticCluster, size_t N> struct neighbour_stats_t {
-    using magnetic_cluster_type = MagneticCluster;
-    using value_type =
-        std::tuple<magnetic_cluster_type*, gsl::span<size_t const>>;
-
-  private:
-    alignas(64) std::array<
-        magnetic_cluster_type*,
-        N> _clusters; ///< Magnetic clusters to which we are connected.
-    alignas(64) std::array<
-        size_t, N> _counts; ///< Number of connections with magnetic clusters.
-    alignas(64) std::array<size_t,
-                           N * N> _sites; ///< Sites to which we are connected
-                                          ///< in each magnetic cluster.
-    int      _boundaries;                 ///< Boundaries bitmask.
-    unsigned _size; ///< Total number of magnetic clusters.
-
-    struct const_iterator_t;
-    friend struct const_iterator_t;
-
-  public:
-    neighbour_stats_t() TCM_NOEXCEPT { reset(); }
-
-    neighbour_stats_t(neighbour_stats_t const&) = delete;
-    neighbour_stats_t(neighbour_stats_t&&)      = delete;
-    neighbour_stats_t& operator=(neighbour_stats_t const&) = delete;
-    neighbour_stats_t& operator=(neighbour_stats_t&&) = delete;
-
-    /// Returns the number of magnetic clusters to which we are connected.
-    constexpr auto size() const noexcept -> size_t { return _size; }
-    /// Returns the boundaries bitmask
-    constexpr auto boundaries() const noexcept -> int { return _boundaries; }
-
-    auto begin() const TCM_NOEXCEPT -> const_iterator_t { return {*this, 0ul}; }
-    auto end() const TCM_NOEXCEPT -> const_iterator_t { return {*this, _size}; }
-
-    /// Resets the statistics so that a new site can be analysed.
-    auto reset() TCM_NOEXCEPT
-    {
-        reset_array(_clusters, static_cast<magnetic_cluster_type*>(nullptr));
-        reset_array(_counts, size_t{0});
-        reset_array(_sites, std::numeric_limits<size_t>::max());
-        _boundaries = 0;
-        _size       = 0;
-    }
-
-    /// Adds neighbour `i`
-    auto insert(size_t const                 i,
-                magnetic_cluster_type* const cluster) TCM_NOEXCEPT -> void
-    {
-        TCM_ASSERT(cluster != nullptr, "`cluster` should not be nullptr");
-        if (auto const index = find(cluster); index != N) {
-            TCM_ASSERT(index < _size, "Hehe!");
-            TCM_ASSERT(_clusters[index] == cluster, "Hehe!");
-            _sites[index * N + _counts[index]] = i;
-            ++_counts[index];
-        }
-        else {
-            _clusters[_size]  = cluster;
-            _sites[_size * N] = i;
-            ++_counts[_size];
-            ++_size;
-        }
-    }
-
-    /// Adds boundary `boundary`
-    constexpr auto insert(int const boundary) noexcept -> void
-    {
-        _boundaries |= boundary;
-    }
-
-    auto sort() TCM_NOEXCEPT -> void
-    {
-        // We sort in reverse
-        auto const less = [this](size_t const i, size_t const j) {
-            return _counts[i] > _counts[j];
-        };
-        auto const swap = [this](size_t const i, size_t const j) {
-            std::swap(_clusters[i], _clusters[j]);
-            std::swap(_counts[i], _counts[j]);
-            for (auto n = size_t{0}; n < N; ++n) {
-                std::swap(_sites[i * N + n], _sites[j * N + n]);
-            }
-        };
-
-        // Simple bubble sort
-        auto begin = size_t{0};
-        auto end   = size_t{_size};
-        do {
-            auto new_end = begin;
-            for (auto i = begin; i != end; ++i) {
-                if (less(i + 1, i)) {
-                    swap(i, i + 1);
-                    new_end = i;
-                }
-            }
-            end = new_end;
-        } while (end - begin > 1);
-
-#if 0
-        for (auto i = size_t{0}; i < N; ++i) {
-            std::fprintf(stderr, "%p, ", _clusters[i]);
-        }
-        std::fprintf(stderr, "\n");
-#endif
-    }
-
-  private:
-    struct const_iterator_t {
-        using value_type =
-            std::tuple<magnetic_cluster_type*, gsl::span<size_t const>>;
-        using reference         = value_type const&;
-        using pointer           = value_type const*;
-        using difference_type   = std::ptrdiff_t;
-        using iterator_category = std::input_iterator_tag;
-
-      private:
-        auto fetch() TCM_NOEXCEPT -> void
-        {
-            TCM_ASSERT(_obj != nullptr, "Bug! Can't fetch from a nullptr");
-            TCM_ASSERT(_i < _obj->_size, "Index out of bounds");
-            auto& [cluster, sites] = _value;
-            cluster                = _obj->_clusters[_i];
-            sites                  = _obj->sites(_i);
-        }
-
-      public:
-        constexpr const_iterator_t() noexcept : _obj{nullptr}, _i{0}, _value{}
-        {}
-
-        const_iterator_t(neighbour_stats_t const& obj, size_t const i)
-            : _obj{std::addressof(obj)}, _i{i}
-        {
-            TCM_ASSERT(i <= obj._size, "");
-            if (_i != _obj->_size) { fetch(); }
-        }
-
-        constexpr const_iterator_t(const const_iterator_t&) noexcept =
-            delete; // TODO(twesterhout): Fix this!
-        constexpr const_iterator_t(const_iterator_t&&) noexcept = default;
-        constexpr const_iterator_t&
-        operator=(const_iterator_t const&) noexcept =
-            delete; // TODO(twesterhout): Fix this!
-        constexpr const_iterator_t&
-        operator=(const_iterator_t&&) noexcept = default;
-
-        constexpr auto operator*() const TCM_NOEXCEPT -> reference
-        {
-            TCM_ASSERT(_obj != nullptr, "Iterator not dereferenceable");
-            TCM_ASSERT(_i < _obj->_size, "Iterator not dereferenceable");
-            return _value;
-        }
-
-        constexpr auto operator-> () const TCM_NOEXCEPT -> pointer
-        {
-            TCM_ASSERT(_obj != nullptr, "Iterator not dereferenceable");
-            TCM_ASSERT(_i < _obj->_size, "Iterator not dereferenceable");
-            return std::addressof(_value);
-        }
-
-        auto operator++() TCM_NOEXCEPT -> const_iterator_t&
-        {
-            TCM_ASSERT(_obj != nullptr, "Iterator not incrementable");
-            TCM_ASSERT(_i < _obj->_size, "Iterator not incrementable");
-            ++_i;
-            if (_i != _obj->_size) { fetch(); }
-            return *this;
-        }
-
-        auto operator++(int) TCM_NOEXCEPT -> const_iterator_t
-        {
-            const_iterator_t old{*this};
-            ++(*this);
-            return old;
-        }
-
-        friend auto operator==(const_iterator_t const& x,
-                               const_iterator_t const& y) TCM_NOEXCEPT -> bool
-        {
-            TCM_ASSERT(x._obj == y._obj,
-                       "Can't compare iterators pointing to different objects");
-            return x._i == y._i;
-        }
-
-        friend auto operator!=(const_iterator_t const& x,
-                               const_iterator_t const& y) TCM_NOEXCEPT -> bool
-        {
-            return !(x == y);
-        }
-
-      private:
-        value_type               _value;
-        neighbour_stats_t const* _obj;
-        size_t                   _i;
-    };
-
-    /// Returns all the sites in cluster `_clusters[i]` to which we are
-    /// connected.
-    auto sites(size_t const i) const TCM_NOEXCEPT -> gsl::span<size_t const>
-    {
-        TCM_ASSERT(i < _size, "Index out of bounds");
-        return {_sites.data() + i * N, _counts[i]};
-    }
-
-    template <class T, size_t Size, size_t Alignment = 64>
-    static auto reset_array(std::array<T, Size>& xs, T value) noexcept
-    {
-#if 0
-        auto* p =
-            static_cast<T*>(__builtin_assume_aligned(xs.data(), Alignment));
-#    pragma omp simd
-        for (auto i = size_t{0}; i < Size; ++i) {
-            p[i] = value;
-        }
-#else
-        using std::begin, std::end;
-        TCM_ASSERT(reinterpret_cast<std::uintptr_t>(xs.data()) % Alignment == 0,
-                   "Bug! Array is not aligned.");
-        std::fill(begin(xs), end(xs), value);
-#endif
-    }
-
-    auto find(magnetic_cluster_type* const cluster) noexcept -> size_t
-    {
-#if 0
-        auto  index = N;
-        auto* p     = static_cast<magnetic_cluster_type**>(
-            __builtin_assume_aligned(_clusters.data(), 64));
-#    pragma omp simd
-        for (auto i = size_t{0}; i < N; ++i) {
-            index = (p[i] == cluster) ? i : index;
-        }
-        return index;
-#else
-        using std::begin, std::end;
-        return static_cast<size_t>(
-            std::find(begin(_clusters), end(_clusters), cluster)
-            - begin(_clusters));
-#endif
-    }
-};
-
 template <class Lattice> class system_state_t { // {{{
 
   public:
@@ -299,9 +58,10 @@ template <class Lattice> class system_state_t { // {{{
     using magnetic_cluster_type  = magnetic_cluster_t<system_state_t>;
     using geometric_cluster_type = geometric_cluster_t<system_state_t>;
     using particle_type          = particle_t<system_state_t>;
+    using lattice_type           = Lattice;
 
     struct pool_deleter {
-        template <class T> auto operator()(T* const p) -> void
+        template <class T> auto operator()(T* const p) noexcept -> void
         {
             TCM_ASSERT(p != nullptr, "Trying to delete a nullptr");
             p->~T();
@@ -345,11 +105,9 @@ template <class Lattice> class system_state_t { // {{{
     random_generator_t&
         _generator; ///< General purpose random number generator.
 
-    sa_buffers_t     _sa_buffers;     ///< Buffers for Simulated Annealing
-    energy_buffers_t _energy_buffers; ///< Buffers for the Hamiltonians.
-    std::unique_ptr<VSLStreamStatePtr, vsl_stream_deleter_t>
-        _rng_stream; ///< Intel MKL's random number generator
-                     ///< stream used for thermalisation.
+    thermaliser_t _thermaliser;
+    // sa_buffers_t     _sa_buffers;     ///< Buffers for Simulated Annealing
+    // energy_buffers_t _energy_buffers; ///< Buffers for the Hamiltonians.
 
     size_t _number_sites;     ///< Total number of sites in the system.
     size_t _number_clusters;  ///< Number of geometric clusters.
@@ -360,6 +118,10 @@ template <class Lattice> class system_state_t { // {{{
         _neighbour_stats; ///< Buffers for analysing neighbours
 
   public: // geometric_cluster relies on this
+    /// Allocates and constructs a new magnetic cluster.
+    ///
+    /// \throws std::bad_alloc if memory allocation fails
+    /// \throws whatever #magnetic_cluster_type constructor may throw.
     template <class... Args>
     auto make_magnetic_cluster(Args&&... args)
         -> unique_ptr<magnetic_cluster_type>
@@ -379,6 +141,10 @@ template <class Lattice> class system_state_t { // {{{
     }
 
   private:
+    /// Allocates and constructs a new geometric cluster.
+    ///
+    /// \throws std::bad_alloc if memory allocation fails
+    /// \throws whatever #geometric_cluster_type constructor may throw.
     template <class... Args>
     auto make_geometric_cluster(Args&&... args)
         -> unique_ptr<geometric_cluster_type>
@@ -408,32 +174,44 @@ template <class Lattice> class system_state_t { // {{{
     // {{{ Callbacks
     /// This is a callback that should be invoked when the size of a geometric
     /// cluster changes.
+    ///
+    /// Helps keep track of the #_max_cluster_size property.
     constexpr auto on_size_changed(geometric_cluster_type const&) noexcept
         -> system_state_t&;
 
-    /// This is a callback that should be invoked when the "bounraries" of a
+    /// This is a callback that should be invoked when the "boundaries" of a
     /// geometric cluster change.
+    ///
+    /// Helps keep track of the #_has_wrapped property.
     constexpr auto on_boundaries_changed(geometric_cluster_type const&) noexcept
         -> system_state_t&;
 
     /// This is a callback that should be invoked when a new geometric cluster
     /// is created.
+    ///
+    /// Helps keep track of the #_number_clusters property.
     constexpr auto on_cluster_created(geometric_cluster_type const&) noexcept
         -> system_state_t&;
 
     /// This is a callback that should be invoked when a geometric cluster is
     /// destroyed (i.e. merged into another).
+    ///
+    /// Helps keep track of the #_number_clusters property
     constexpr auto on_cluster_destroyed(geometric_cluster_type const&) noexcept
         -> system_state_t&;
 
+    /// This is a callback that should be called when \p small is merged into \p
+    /// big.
+    ///
+    /// Helps keep track of the #_particles.
     constexpr auto on_cluster_merged(geometric_cluster_type& big,
                                      geometric_cluster_type& small) noexcept
         -> system_state_t&;
     // }}}
 
-    constexpr auto optimizing() const noexcept -> bool { return _optimizing; }
+    // constexpr auto optimizing() const noexcept -> bool { return _optimizing; }
 
-    TCM_NOINLINE auto optimizing(bool do_opt) -> void;
+    // TCM_NOINLINE auto optimizing(bool do_opt) -> void;
 
     constexpr auto max_number_sites() const noexcept -> size_t;
     constexpr auto number_sites() const noexcept -> size_t;
@@ -441,9 +219,15 @@ template <class Lattice> class system_state_t { // {{{
     constexpr auto max_cluster_size() const noexcept -> size_t;
     constexpr auto has_wrapped() const & noexcept -> gsl::span<bool const>;
     constexpr auto lattice() const noexcept -> Lattice const&;
-    constexpr auto sa_buffers() & noexcept -> sa_buffers_t&;
-    constexpr auto energy_buffers() & noexcept -> energy_buffers_t&;
-    constexpr auto rng_stream() & noexcept -> VSLStreamStatePtr;
+    // constexpr auto sa_buffers() & noexcept -> sa_buffers_t&;
+    // constexpr auto energy_buffers() & noexcept -> energy_buffers_t&;
+    auto rng_stream() const -> VSLStreamStatePtr;
+
+    constexpr auto is_empty(size_t const i) const TCM_NOEXCEPT -> bool
+    {
+        TCM_ASSERT(0 <= i && i < max_number_sites(), "Index out of bounds");
+        return _particles[i].is_empty();
+    }
 
     // [Spins] {{{
     constexpr auto get_angle(size_t const i) const TCM_NOEXCEPT -> angle_t
@@ -451,6 +235,20 @@ template <class Lattice> class system_state_t { // {{{
         TCM_ASSERT(0 <= i && i < max_number_sites(), "Index out of bounds");
         TCM_ASSERT(!_particles[i].is_empty(), "Site is empty");
         return _angles[i];
+    }
+
+    constexpr auto S_x(size_t const i) const TCM_NOEXCEPT -> float
+    {
+        TCM_ASSERT(0 <= i && i < max_number_sites(), "Index out of bounds");
+        TCM_ASSERT(!_particles[i].is_empty(), "Site is empty");
+        return _S_x[i];
+    }
+
+    constexpr auto S_y(size_t const i) const TCM_NOEXCEPT -> float
+    {
+        TCM_ASSERT(0 <= i && i < max_number_sites(), "Index out of bounds");
+        TCM_ASSERT(!_particles[i].is_empty(), "Site is empty");
+        return _S_y[i];
     }
 
     auto set_angle(size_t i, angle_t new_angle) TCM_NOEXCEPT -> void;
@@ -627,6 +425,8 @@ template <class Lattice> class system_state_t { // {{{
   public:
     TCM_NOINLINE auto operator()(size_t const i,
                                  std::false_type /*is periodic?*/);
+
+    TCM_NOINLINE auto thermalise() -> void;
 }; // }}}
 
 template <class Lattice>
@@ -645,9 +445,8 @@ system_state_t<Lattice>::system_state_t(Lattice const&      lattice,
     , _lattice{lattice}
     , _generator{generator}
     // The biggest cluster we could ever have to thermalise is the whole system.
-    , _sa_buffers{size(lattice)}
-    , _energy_buffers{size(lattice)}
-    , _rng_stream{make_rng_stream(VSL_BRNG_ARS5)}
+    , _thermaliser{size(lattice)} // , _sa_buffers{size(lattice)}
+    // , _energy_buffers{size(lattice)}
     , _number_sites{0}
     , _number_clusters{0}
     , _max_cluster_size{0}
@@ -710,16 +509,20 @@ constexpr auto system_state_t<Lattice>::on_cluster_merged(
 }
 // [Callbacks] }}}
 
+#if 0
 template <class Lattice>
 TCM_NOINLINE auto system_state_t<Lattice>::optimizing(bool const do_opt) -> void
 {
+#    if 0
     if (!_optimizing && do_opt) {
         for (auto& x : _particles) {
             if (x.is_root()) { x.cluster().optimize_full(); }
         }
     }
+#    endif
     _optimizing = do_opt;
 }
+#endif
 
 // {{{ Statistics
 template <class Lattice>
@@ -763,6 +566,7 @@ constexpr auto system_state_t<Lattice>::lattice() const noexcept
     return _lattice;
 }
 
+#if 0
 template <class Lattice>
     constexpr auto system_state_t<Lattice>::sa_buffers()
     & noexcept -> sa_buffers_t&
@@ -776,12 +580,12 @@ template <class Lattice>
 {
     return _energy_buffers;
 }
+#endif
 
 template <class Lattice>
-    constexpr auto system_state_t<Lattice>::rng_stream()
-    & noexcept -> VSLStreamStatePtr
+auto system_state_t<Lattice>::rng_stream() const -> VSLStreamStatePtr
 {
-    return *_rng_stream;
+    return random_stream();
 }
 
 // [Spins] {{{
@@ -913,22 +717,18 @@ auto system_state_t<Lattice>::find_root_index(size_t i) -> size_t
 }
 
 template <class Lattice>
-auto system_state_t<Lattice>::connect_and_merge(magnetic_cluster_type& x,
-                                                magnetic_cluster_type& y)
+auto system_state_t<Lattice>::connect_and_merge(magnetic_cluster_type& m1,
+                                                magnetic_cluster_type& m2)
     -> void
 {
-    auto& x_geom = get_geometric_cluster(x);
-    auto& y_geom = get_geometric_cluster(y);
-    if (std::addressof(x_geom) == std::addressof(y_geom)) {
-        x_geom.connect(no_optimize, x, y);
-    }
-    else if (x_geom.size() >= y_geom.size()) {
-        x_geom.merge_and_connect(
-            no_optimize, {{std::addressof(x)}, {std::addressof(y)}}, y_geom);
+    auto& g1 = get_geometric_cluster(m1);
+    auto& g2 = get_geometric_cluster(m1);
+    if (&g1 == &g2) { g1.connect(m1, m2); }
+    else if (g1.size() >= g2.size()) {
+        g1.merge_and_connect({{&m1}, {&m2}}, g2);
     }
     else {
-        y_geom.merge_and_connect(
-            no_optimize, {{std::addressof(y)}, {std::addressof(x)}}, x_geom);
+        g2.merge_and_connect({{&m2}, {&m1}}, g1);
     }
 }
 
@@ -940,22 +740,16 @@ auto system_state_t<Lattice>::connect(size_t i, size_t j) -> void
     TCM_ASSERT(_clusters[i] != nullptr && _clusters[j] != nullptr, "");
     auto root_big   = find_root_index(i);
     auto root_small = find_root_index(j);
-
     // i and j belong to the same geometric cluster cluster
     if (root_big == root_small) {
+        // We only need to connect i and j if they don't already belong to the
+        // same magnetic cluster.
         if (_clusters[i] != _clusters[j]) {
-            if (_optimizing) {
-                _particles[root_big].cluster().connect(*_clusters[i],
-                                                       *_clusters[j]);
-            }
-            else {
-                _particles[root_big].cluster().connect(
-                    no_optimize, *_clusters[i], *_clusters[j]);
-            }
+            auto& geometric = _particles[root_big].cluster();
+            geometric.connect(*_clusters[i], *_clusters[j]);
         }
         return;
     }
-
     // i and j belong to different geometric clusters
     if (_particles[root_big].cluster().size()
         < _particles[root_small].cluster().size()) {
@@ -964,15 +758,9 @@ auto system_state_t<Lattice>::connect(size_t i, size_t j) -> void
     }
     // now `i` is part of the bigger  cluster with root `root_big`
     //     `j` is part of the smaller cluster with root `root_small`
-
-    if (_optimizing) {
-        _particles[root_big].cluster().merge({i, j},
-                                             _particles[root_small].cluster());
-    }
-    else {
-        _particles[root_big].cluster().merge(no_optimize, {i, j},
-                                             _particles[root_small].cluster());
-    }
+    auto& big   = _particles[root_big].cluster();
+    auto& small = _particles[root_small].cluster();
+    big.merge({i, j}, small);
 }
 
 template <class Lattice>
@@ -988,47 +776,43 @@ TCM_NOINLINE auto system_state_t<Lattice>::
     //              neighbour_stats.boundaries(), neighbour_stats.size());
 
     if (neighbour_stats.size() == 0) {
-        // std::fprintf(stderr, "Doing nothing...\n");
         // `i` has no occupied neighbours, so we don't need to
         // merge or optimise anything.
         create_new_cluster(i, neighbour_stats.boundaries());
         return;
     }
 
-    if (auto it = neighbour_stats.begin(); std::get<1>(*it).size() > 1) {
+    auto it = neighbour_stats.begin();
+    if (it->cluster->size() > 1) {
         // There is at least one magnetic cluster with which `i` has more than
         // one connection. Thus `i` can be directly added to this cluster.
-        _particles[i] = particle_type{from_parent_index, std::get<1>(*it)[0]};
+        _particles[i] = particle_type{from_parent_index, it->neighbours[0]};
+        // TODO(twesterhout): Remove this, because the angle is optimised on
+        // insertion anyway.
         set_angle(i, random_angle(_generator));
-        std::get<0>(*it)->insert(no_optimize, i);
+        it->cluster->insert(i);
         ++it;
-
-        bool have_connected = false;
-        for (; it != neighbour_stats.end() && std::get<1>(*it).size() > 1;
-             ++it) {
+        for (; it != neighbour_stats.end() && it->cluster->size() > 1; ++it) {
             // std::fprintf(stderr, "Connect and merging...\n");
-            TCM_ASSERT(&get_magnetic_cluster(i) != std::get<0>(*it), "Noooo!");
-            connect_and_merge(get_magnetic_cluster(i), *std::get<0>(*it));
-            have_connected = true;
-        }
-        if (!have_connected) { get_magnetic_cluster(i).optimize_one(i); }
-        else {
-            get_magnetic_cluster(i).optimize_full();
-        }
-
-        for (; it != neighbour_stats.end(); ++it) {
-            TCM_ASSERT(std::get<1>(*it).size() == 1, "");
-            // std::fprintf(stderr, "Connecting...\n");
-            connect(std::get<1>(*it)[0], i);
+            TCM_ASSERT(&get_magnetic_cluster(i) != it->cluster, "Noooo!");
+            // We know
+            //   * that `i` has more that one connection with `*it->cluster`, and
+            //   * that `i` already belongs to another magnetic cluster.
+            // Thus these two magnetic clusters should be merged (it doesn't
+            // matter whether they already belong to the same geometric cluster
+            // or not).
+            connect_and_merge(get_magnetic_cluster(i), *it->cluster);
         }
     }
     else {
+        // The is no magnetic cluster to which `i` can be added directly, so we
+        // have to create a free-standing magnetic cluster first.
         create_new_cluster(i, neighbour_stats.boundaries());
-        for (; it != neighbour_stats.end(); ++it) {
-            TCM_ASSERT(std::get<1>(*it).size() == 1, "");
-            // std::fprintf(stderr, "Connecting...\n");
-            connect(std::get<1>(*it)[0], i);
-        }
+    }
+    for (; it != neighbour_stats.end(); ++it) {
+        // std::fprintf(stderr, "Connecting...\n");
+        TCM_ASSERT(it->cluster->size() == 1, "");
+        connect(it->neighbours[0], i);
     }
 
 #if 0
@@ -1056,24 +840,6 @@ TCM_NOINLINE auto system_state_t<Lattice>::
 }
 // [Adding sites] }}}
 
-auto enumerate_sites(std::int32_t const n) noexcept
-    -> std::unique_ptr<std::int32_t[], FreeDeleter>;
-
-TCM_NOINLINE
-auto enumerate_sites(std::int32_t const n) noexcept
-    -> std::unique_ptr<std::int32_t[], FreeDeleter>
-{
-    TCM_ASSERT(n > 0, "Negative number of sites");
-    auto const bytes_count = static_cast<std::size_t>(n) * sizeof(std::int32_t);
-    auto* const p =
-        reinterpret_cast<std::int32_t*>(std::aligned_alloc(64ul, bytes_count));
-    if (p == nullptr) { return nullptr; }
-    for (std::int32_t i = 0; i < n; ++i) {
-        p[i] = i;
-    }
-    return {p, FreeDeleter{}};
-}
-
 template <class Lattice>
 auto percolate(Lattice const& lattice, size_t const n_min, size_t const n_max,
                tcm_percolation_results_t const* results,
@@ -1087,8 +853,7 @@ auto percolate(Lattice const& lattice, size_t const n_min, size_t const n_max,
     auto const size  = ::TCM_NAMESPACE::size(lattice);
     auto&      gen   = random_generator();
     auto const sites = enumerate_sites(size);
-    shuffler_t shuffler{sites.get(), static_cast<std::ptrdiff_t>(size),
-                        gen}; // TODO(twesterhout): Fix this to use gsl::span
+    shuffler_t shuffler{gsl::span<int32_t>{sites.get(), size}, gen};
 
     system_state_t<Lattice> state{lattice, gen};
 
@@ -1127,7 +892,7 @@ auto percolate(Lattice const& lattice, size_t const n_min, size_t const n_max,
         }
     };
 
-    state.optimizing(false);
+    // state.optimizing(false);
     auto       i     = size_t{0};
     auto       first = shuffler.begin();
     auto const last  = shuffler.end();
@@ -1135,7 +900,7 @@ auto percolate(Lattice const& lattice, size_t const n_min, size_t const n_max,
         state(static_cast<size_t>(*first), std::false_type{});
     }
 
-    state.optimizing(true);
+    // state.optimizing(true);
     save(i);
     for (; i < n_max && first != last; ++first, ++i) {
         state(static_cast<size_t>(*first), std::false_type{});
