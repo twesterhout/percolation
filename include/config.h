@@ -80,6 +80,5 @@
 #    endif
 #    define TCM_ASSERT(cond, msg) assert((cond) && (msg)) /* NOLINT */
 #else
-#    error "Oh-oh!"
 #    define TCM_ASSERT(cond, msg)
 #endif

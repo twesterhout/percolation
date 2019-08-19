@@ -26,6 +26,7 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+// vim: foldenable foldmethod=marker
 #pragma once
 
 #include "config.h"
@@ -36,27 +37,32 @@
 #    include <stdint.h>
 #endif
 
+/// Two-dimensional square lattice.
 struct _tcm_square_lattice {
-    int64_t (*neighbours)[4];
-    int64_t length;
-    int64_t size;
-    bool    periodic;
+    int64_t (*neighbours)[4]; /// Adjacency list of the graph
+    int64_t length;           ///< Side length
+    int64_t size;             ///< Total number of spins
+    bool    periodic;         ///< Whether boundary conditions are periodic
 };
 
+/// Three-dimensional cubic lattice
 struct _tcm_cubic_lattice {
-    int64_t (*neighbours)[6];
-    int64_t length;
-    int64_t size;
-    bool    periodic;
+    int64_t (*neighbours)[6]; ///< Adjacency list of the graph
+    int64_t length;           ///< Side length
+    int64_t size;             ///< Total number of spins
+    bool    periodic;         ///< Whether boundary conditions are periodic
 };
 
+/// Two-dimensional triangular lattice
 struct _tcm_triangular_lattice {
-    int64_t (*neighbours)[6];
-    int64_t length;
-    int64_t length_y;
-    int64_t size;
+    int64_t (*neighbours)[6]; ///< Adjacency list of the graph
+    int64_t length;           ///< Width of the sample
+    int64_t length_y;         ///< Height of the sample
+    int64_t size;             ///< Total number of spins
 };
 
+/// Three dimensional lattice which is build by vertically stacking layers with
+/// triangular lattice.
 struct _tcm_triangular_stacked_lattice {
     int64_t (*neighbours)[8];
     int64_t length;
@@ -165,6 +171,3 @@ tcm_cubic_position_to_index(tcm_cubic_lattice_t const* lattice, int64_t const x,
     return lattice->length * lattice->length * z + lattice->length * y + x;
 }
 // }}}
-
-
-
