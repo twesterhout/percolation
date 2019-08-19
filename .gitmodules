@@ -1,3 +1,9 @@
 [submodule "third_party/boost"]
 	path = third_party/boost
 	url = git@github.com:boostorg/boost
+[submodule "third_party/gsl-lite"]
+	path = third_party/gsl-lite
+	url = git@github.com:martinmoene/gsl-lite
+[submodule "third_party/pcg-cpp"]
+	path = third_party/pcg-cpp
+	url = git@github.com:imneme/pcg-cpp
