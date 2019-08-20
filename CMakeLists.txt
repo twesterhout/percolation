@@ -133,7 +133,7 @@ function(setup_percolation_target MY_TARGET)
     check_cxx_compiler_flag("-march=native" TCM_COMPILER_OPT_NATIVE_SUPPORTED)
     if(TCM_COMPILER_OPT_NATIVE_SUPPORTED)
         message(STATUS "[percolation] Using -march=native for ${MY_TARGET}.")
-        target_compile_options(${MY_TARGET} PRIVATE "-march=native")
+        target_compile_options(${MY_TARGET} PUBLIC "-march=native")
     endif()
 
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -148,13 +148,7 @@ add_library(percolation SHARED
     src/lattice.c
 )
 target_include_directories(percolation PUBLIC include)
-target_compile_features(percolation PUBLIC cxx_std_17)
-target_compile_options(percolation PUBLIC ${TCM_WARNING_FLAGS})
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    target_compile_options(percolation PUBLIC -fcolor-diagnostics)
-elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    target_compile_options(percolation PUBLIC -fdiagnostics-color=always)
-endif()
+setup_percolation_target(percolation)
 target_link_libraries(percolation PUBLIC gsl::gsl-lite pcg)
 if ("${TCM_BUILD_TYPE}" STREQUAL "DEBUG")
     target_compile_definitions(percolation PUBLIC
@@ -168,7 +162,7 @@ else()
 endif()
 
 if(BUILD_TESTING)
-    add_subdirectory(test/headers)
+    add_subdirectory(test)
 endif()
 
 if (FALSE)
