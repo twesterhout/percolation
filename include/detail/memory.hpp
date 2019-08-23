@@ -27,10 +27,11 @@ auto pool_make_unique(Args&&... args) -> pool_unique_ptr<T>
 {
     auto& pool = thread_local_pool<T>();
     // Useful for the case T's constructor throws
-    auto temp_ptr = std::unique_ptr<void>{pool.malloc(),
-                                          [&pool](auto* p) { pool.free(p); }};
-    ::new (static_cast<void*>(temp_ptr.get())) T{std::forward<Args>(args)...};
-    return pool_unique_ptr<T>{temp_ptr.release()};
+    auto deleter  = [&pool](auto* p) { pool.free(p); };
+    auto temp_ptr = std::unique_ptr<void, decltype(deleter)>{
+        pool.malloc(), std::move(deleter)};
+    ::new (temp_ptr.get()) T{std::forward<Args>(args)...};
+    return pool_unique_ptr<T>{static_cast<T*>(temp_ptr.release())};
 }
 
 TCM_NAMESPACE_END
