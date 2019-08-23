@@ -1,4 +1,4 @@
-// Copyright (c) 2018, Tom Westerhout
+// Copyright (c) 2018-2019, Tom Westerhout
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -29,23 +29,165 @@
 #pragma once
 
 #include "config.h"
+#include "memory.hpp"
+
+#include <gsl/gsl-lite.hpp>
 #include <cstdint>
-#include <limits>
-#include <memory>
 
 TCM_NAMESPACE_BEGIN
 
-template <class> class geometric_cluster_t;
+class geometric_cluster_base_t;
 
+#if 0
 struct from_parent_index_t {};
 constexpr from_parent_index_t from_parent_index{};
+#endif
 
+struct particle_base_t {
+    using unique_ptr = pool_unique_ptr<geometric_cluster_base_t>;
+
+  private:
+    union {
+        intptr_t   _raw;
+        unique_ptr _cluster;
+
+        static_assert(sizeof(unique_ptr) == sizeof(void*));
+        static_assert(alignof(unique_ptr) == alignof(void*));
+    };
+
+    /// If root, destroys the geometric cluster and does nothing otherwise.
+    constexpr auto destroy() noexcept -> void;
+
+  public:
+    /// Returns whether the site is empty.
+    ///
+    /// \noexcept
+    [[nodiscard]] constexpr auto is_empty() const noexcept -> bool
+    {
+        return _raw == 0;
+    }
+
+    /// Returns whether the site is the root of a geometric cluster.
+    ///
+    /// \noexcept
+    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
+    {
+        return _raw > 0;
+    }
+
+    /// Returns whether the site has a parent.
+    [[nodiscard]] constexpr auto is_child() const noexcept -> bool
+    {
+        return _raw < 0;
+    }
+
+    /// Swaps two particles.
+    friend constexpr auto swap(particle_base_t& left,
+                               particle_base_t& right) noexcept -> void
+    {
+        auto const temp = left._raw;
+        left._raw       = right._raw;
+        right._raw      = temp;
+    }
+
+    /// Default constructor.
+    ///
+    /// Creates an empty site.
+    constexpr particle_base_t() noexcept : _raw{0} {}
+
+    /// **Deleted** copy constructor.
+    constexpr particle_base_t(particle_base_t const&) = delete;
+    /// **Deleted** copy assignment operator.
+    constexpr auto operator =(particle_base_t const&)
+        -> particle_base_t& = delete;
+    /// Move constructor.
+    ///
+    /// \noexcept
+    constexpr particle_base_t(particle_base_t&& other) noexcept
+        : particle_base_t{}
+    {
+        swap(*this, other);
+    }
+    /// Move assignment operator.
+    ///
+    /// \noexcept
+    /*constexpr*/ auto operator=(particle_base_t&& other) noexcept
+        -> particle_base_t&
+    {
+        particle_base_t temp{std::move(other)};
+        swap(*this, temp);
+        return *this;
+    }
+
+    /// Constructs a new particle given its parent index.
+    ///
+    /// \param parent_index Index of the parent site.
+    /// \noexcept
+    explicit particle_base_t(gsl::not_null<particle_base_t*> parent)
+        TCM_NOEXCEPT : _raw{-reinterpret_cast<intptr_t>(parent.get())}
+    {
+        TCM_ASSERT(is_child(), "post-condition violated");
+    }
+
+    /// Constructs a new particle given a geometric cluster.
+    ///
+    /// \pre \p cluster is not `nullptr`.
+    /// \noexcept
+    explicit particle_base_t(unique_ptr cluster) TCM_NOEXCEPT
+        : _cluster{std::move(cluster)}
+    {
+        TCM_ASSERT(is_root(), "post-condition violated");
+    }
+
+    ~particle_base_t() noexcept { destroy(); }
+
+    [[nodiscard]] auto parent() const TCM_NOEXCEPT -> particle_base_t const&
+    {
+        TCM_ASSERT(is_child(), "only children have parents");
+        return *reinterpret_cast<particle_base_t const*>(-_raw);
+    }
+
+    [[nodiscard]] auto parent() TCM_NOEXCEPT -> particle_base_t&
+    {
+        TCM_ASSERT(is_child(), "only children have parents");
+        return *reinterpret_cast<particle_base_t*>(-_raw);
+    }
+
+    /// Changes the parent of this site.
+    auto parent(particle_base_t& new_parent) TCM_NOEXCEPT -> void
+    {
+        TCM_ASSERT(is_child(), "only children have parents.");
+        _raw = -reinterpret_cast<intptr_t>(std::addressof(new_parent));
+    }
+
+    /// Returns the cluster the particle owns.
+    ///
+    /// \pre is_empty() returns `false` and is_root() returns `true`.
+    /// \noexcept
+    auto cluster() const TCM_NOEXCEPT -> geometric_cluster_base_t const&
+    {
+        TCM_ASSERT(is_root(), "only cluster root nodes store the info.");
+        return *_cluster;
+    }
+
+    /// \overload
+    auto cluster() TCM_NOEXCEPT -> geometric_cluster_base_t&
+    {
+        TCM_ASSERT(is_root(), "only cluster root nodes store the info.");
+        return *_cluster;
+    }
+};
+
+inline auto find_root(particle_base_t& particle) -> particle_base_t&;
+
+#if 0
 /// A lightweight variant<index, owner<geometric_cluster>> built on
 /// top of intptr_t.
+///
+// NOTE: This class is just a great collection of undefined behaviour...
+// Assumptions which ensure it works correctly are really shaky :)
+//                                                          Tom
 template <class System> union particle_t { // {{{
-    static_assert(sizeof(void*) == sizeof(std::intptr_t),
-                  "What kind of system is this?");
-
     using cluster_type = geometric_cluster_t<System>;
     using unique_ptr   = typename System::template unique_ptr<cluster_type>;
 
@@ -198,5 +340,6 @@ template <class System> union particle_t { // {{{
         return *_cluster;
     }
 }; // }}}
+#endif
 
 TCM_NAMESPACE_END
