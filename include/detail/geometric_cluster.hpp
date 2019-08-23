@@ -28,11 +28,103 @@
 
 #pragma once
 
-#include "lattice.hpp"
+// #include "lattice.hpp"
 #include "magnetic_cluster.hpp"
 
 TCM_NAMESPACE_BEGIN
 
+class system_base_t;
+
+class geometric_cluster_base_t { // {{{
+
+  public:
+    using node_type = magnetic_cluster_base_t::unique_ptr;
+
+  private:
+    uint32_t       _root_index;   ///< Index of the root site
+    uint32_t       _size;         ///< Number of sites in the cluster
+    int            _boundaries;   ///< Boundaries bitmask
+    node_type      _root;         ///< Root magnetic cluster
+    system_base_t& _system_state; ///< The system
+
+  public:
+    /// Creates a one-site geometric cluster.
+    ///
+    /// This function automatically calls `on_*` functions of #tcm_system_t
+    /// notifying it that a new cluster has been created.
+    ///
+    /// \param site       Index of the site.
+    /// \param boundaries Which boundaries `site` touches. It is a bit-mask
+    ///                   built by xor'ing values of type #tcm_bounrary_t.
+    /// \param phase      Orientation of the spin. This value is typically
+    ///                   chosen randomly.
+    /// \param system     Reference to the global system state.
+    ///
+    /// \throws std::bad_alloc If memory allocation fails.
+    inline geometric_cluster_base_t(uint32_t site, int boundaries,
+                                    angle_t phase, system_base_t& system);
+
+    /// **Deleted** copy constructor.
+    geometric_cluster_base_t(geometric_cluster_base_t const&) = delete;
+    /// **Deleted** move constructor.
+    geometric_cluster_base_t(geometric_cluster_base_t&&) = delete;
+    /// **Deleted** copy assignment operator.
+    auto operator                    =(geometric_cluster_base_t const&)
+        -> geometric_cluster_base_t& = delete;
+    /// **Deleted** move assignment operator.
+    auto operator                    =(geometric_cluster_base_t &&)
+        -> geometric_cluster_base_t& = delete;
+
+    /// Destructor which tells the #_system_state that the number of geometric
+    /// clusters should be decreased.
+    inline ~geometric_cluster_base_t() noexcept;
+
+    /// Returns the number of sites in this cluster.
+    ///
+    /// \noexcept
+    [[nodiscard]] constexpr auto size() const noexcept -> uint32_t;
+
+    /// Returns the boundaries bit-mask.
+    ///
+    /// \noexcept
+    [[nodiscard]] constexpr auto boundaries() const noexcept -> int;
+
+    /// Returns the index of the root site.
+    ///
+    /// \noexcept
+    [[nodiscard]] constexpr auto root_index() const noexcept -> uint32_t;
+
+  private:
+    /// Inverts the tree such that \p cluster becomes the new root. If \p
+    /// cluster is already root, nothing's done.
+    ///
+    /// \param cluster The new root. It must belong to `*this`.
+    auto invert(magnetic_cluster_base_t& new_root) -> void;
+
+  public:
+    /// Merges \p other into `*this`.
+    ///
+    /// \param edge The new edge connecting `*this` to \p other (i.e.
+    ///             `edge.first` must belong to `*this` and `edge.second` must
+    ///             belong to \p other).
+    /// \param other The cluster to merge into `*this`.
+    ///
+    /// \note **\p other is destroyed in this function!** Trying to use the
+    /// reference to it is undefined behaviour.
+    inline auto merge(std::pair<uint32_t, uint32_t> edge,
+                      geometric_cluster_base_t&     other) -> void;
+
+    /// Connects \p left and \p right forming a cycle in the graph. All magnetic
+    /// clusters belonging to this cycle are merged into one.
+    ///
+    /// \p left and \p right must belong to `*this`.
+    inline auto form_cycle(magnetic_cluster_base_t& left,
+                           magnetic_cluster_base_t& right) -> void;
+
+    // auto rotate(angle_t const delta_angle) { _root->rotate(delta_angle); }
+}; // }}}
+
+#if 0
 template <class System> class geometric_cluster_t { // {{{
 
   public:
@@ -152,7 +244,9 @@ template <class System> class geometric_cluster_t { // {{{
 
     auto rotate(angle_t const delta_angle) { _root->rotate(delta_angle); }
 }; // }}}
+#endif
 
+#if 0
 // {{{ IMPLEMENTATION geometric_cluster_t
 template <class System>
 TCM_FORCEINLINE geometric_cluster_t<System>::geometric_cluster_t(
@@ -228,7 +322,7 @@ geometric_cluster_t<System>::merge(std::pair<size_t, size_t> edge,
         .on_cluster_merged(*this, other);
 }
 
-#if 0
+#    if 0
 template <class System>
 TCM_FORCEINLINE auto
 geometric_cluster_t<System>::merge(no_optimize_t /*unused*/,
@@ -258,7 +352,7 @@ geometric_cluster_t<System>::merge(no_optimize_t /*unused*/,
         .on_boundaries_changed(*this)
         .on_cluster_merged(*this, other);
 }
-#endif
+#    endif
 
 template <class System>
 TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
@@ -289,7 +383,7 @@ TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
         .on_cluster_merged(*this, other);
 }
 
-#if 0
+#    if 0
 template <class System>
 TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
     no_optimize_t,
@@ -320,7 +414,7 @@ TCM_FORCEINLINE auto geometric_cluster_t<System>::merge_and_connect(
         .on_boundaries_changed(*this)
         .on_cluster_merged(*this, other);
 }
-#endif
+#    endif
 
 namespace detail {
 template <class System>
@@ -430,7 +524,7 @@ auto geometric_cluster_t<System>::connect(magnetic_cluster_type& left,
     }
 }
 
-#if 0
+#    if 0
 template <class System>
 auto geometric_cluster_t<System>::connect(no_optimize_t,
                                           magnetic_cluster_type& left,
@@ -447,16 +541,17 @@ auto geometric_cluster_t<System>::connect(no_optimize_t,
         path_right.pop_back();
     }
 }
-#endif
+#    endif
 
-#if 0
+#    if 0
 template <class System>
 auto geometric_cluster_t<System>::optimize_full() -> void
 {
     _root->dfs([](auto& x) { x.optimize_full(); });
 }
-#endif
+#    endif
 
 // }}}
+#endif
 
 TCM_NAMESPACE_END
