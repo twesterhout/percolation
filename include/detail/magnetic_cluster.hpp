@@ -39,7 +39,6 @@
 #include <sleef.h>
 #include <memory>
 #include <optional>
-#include <stack>
 #include <utility>
 #include <vector>
 
@@ -206,8 +205,8 @@ struct magnetic_cluster_base_t {
     /// \param index Index of the site.
     /// \param angle Direction of the spin at site \p index.
     /// \param system A reference to the system state.
-    inline magnetic_cluster_base_t(uint32_t index, angle_t angle,
-                                   system_base_t& system);
+    TCM_FORCEINLINE magnetic_cluster_base_t(uint32_t index, angle_t angle,
+                                            system_base_t& system);
 
     /// **Deleted** copy constructor.
     magnetic_cluster_base_t(magnetic_cluster_base_t const&) = delete;
@@ -226,20 +225,20 @@ struct magnetic_cluster_base_t {
     /// `*this`.
     ///
     /// \throws std::bad_alloc if memory allocation fails.
-    inline auto attach(child_conn_t connection) -> void;
+    TCM_FORCEINLINE auto attach(child_conn_t connection) -> void;
 
     /// Detaches the `i`'th child.
     ///
     /// \param i Index of the child to detach. \p i must be less than
     /// number_children().
     /// \return The child connection.
-    inline auto detach(size_t i) -> child_conn_t;
+    TCM_FORCEINLINE auto detach(size_t i) -> child_conn_t;
 
     /// Adds site `i` to the cluster.
     ///
     /// \param i     Index of the site.
     /// \param angle Direction of the spin.
-    inline auto insert(uint32_t i, angle_t angle) -> void;
+    TCM_FORCEINLINE auto insert(uint32_t i, angle_t angle) -> void;
 
     /// Merges \p cluster into `*this`.
     ///
@@ -252,7 +251,7 @@ struct magnetic_cluster_base_t {
     /// \p angle.
     ///
     /// Rotation amounts to a simle depth-first search over the subtree.
-    inline auto rotate(angle_t angle) -> void;
+    TCM_FORCEINLINE auto rotate(angle_t angle) -> void;
 
     /// Returns whether the cluster is the root of the geometric cluster.
     ///
@@ -275,7 +274,7 @@ struct magnetic_cluster_base_t {
     /// Returns a non-owning view of the sites in the cluster.
     ///
     /// \noexcept
-    constexpr auto sites() const noexcept -> gsl::span<uint32_t const>;
+    inline auto sites() const noexcept -> gsl::span<uint32_t const>;
 
     constexpr auto system() const noexcept -> system_base_t const&;
     constexpr auto system() noexcept -> system_base_t&;
@@ -290,8 +289,8 @@ struct magnetic_cluster_base_t {
     /// \noexcept
     inline auto number_children() const noexcept -> size_t;
 
-    friend inline auto move_root_down(magnetic_cluster_base_t::unique_ptr root,
-                                      size_t child_index)
+    friend TCM_FORCEINLINE auto
+    move_root_down(magnetic_cluster_base_t::unique_ptr root, size_t child_index)
         -> magnetic_cluster_base_t::unique_ptr;
 
     /// Runs Depth-First Search on the subtree applying \p fn to each node.
@@ -303,135 +302,6 @@ struct magnetic_cluster_base_t {
     template <class Lattice>
     inline auto align_with_parent(Lattice const& lattice) -> void;
 };
-
-// ================ {{{ IMPLEMENTATION: magnetic_cluster_t
-TCM_FORCEINLINE magnetic_cluster_base_t::magnetic_cluster_base_t(
-    uint32_t const site, angle_t const phase, system_base_t& system_state)
-    : _parent{std::nullopt}
-    , _children{}
-    // TODO(twesterhout): Should we reserve some memory in advance?
-    , _sites({site})
-    , _system_state{system_state}
-{
-    _system_state.on_cluster_created(*this, site, phase);
-#if 0
-    // The following should be inside #on_magnetic_cluster_created
-    _system_state.set_angle(site, phase);
-    _system_state.set_magnetic_cluster(site, *this);
-#endif
-}
-
-TCM_FORCEINLINE auto magnetic_cluster_base_t::insert(uint32_t const site,
-                                                     angle_t const  phase)
-    -> void
-{
-    _sites.push_back(site);
-    _system_state.set_magnetic_cluster(site, *this);
-    _system_state.set_angle(site, phase);
-    _system_state.on_size_changed(*this);
-}
-
-TCM_FORCEINLINE auto magnetic_cluster_base_t::attach(child_conn_t child) -> void
-{
-    using std::begin, std::end;
-    TCM_ASSERT(child.data != nullptr, "can't attach a non-existent cluster");
-    TCM_ASSERT(!child.data->_parent.has_value(), "cluster must be an orphan");
-    TCM_ASSERT(&child.data->_system_state == &_system_state,
-               "clusters must belong to the same system");
-    TCM_ASSERT(std::count(begin(child.data->_sites), end(child.data->_sites),
-                          child.edge.second)
-                   == 1,
-               "invalid child_conn_t");
-    TCM_ASSERT(std::count(begin(_sites), end(_sites), child.edge.first) == 1,
-               "invalid child_conn_t");
-
-    // Attach the child
-    child.data->_parent = parent_conn_t{
-        /*index=*/static_cast<uint32_t>(_children.size()), /*edge=*/child.edge,
-        /*data=*/gsl::not_null<magnetic_cluster_base_t*>{this}};
-    _children.emplace_back(std::move(child));
-}
-
-auto magnetic_cluster_base_t::merge(unique_ptr cluster) -> void
-{
-    using std::begin, std::end;
-    TCM_ASSERT(cluster != nullptr, "can't merge with a non-existant cluster");
-    TCM_ASSERT(!cluster->_parent.has_value(), "cluster must be an orphan");
-    TCM_ASSERT(&cluster->_system_state == &_system_state,
-               "clusters must belong to the same system");
-
-    // Steal children from `cluster`. For each child we have to update its
-    // `parent_conn_t.data` to point to `this`. Afterwards, that child can be
-    // safely moved into `this->_children`.
-    _children.reserve(_children.size() + cluster->_children.size());
-    for (auto& conn : cluster->_children) {
-        conn.data->_parent->index = static_cast<uint32_t>(_children.size());
-        // conn.data->_parent->edge is unchanged
-        conn.data->_parent->data = this;
-        _children.emplace_back(std::move(conn));
-    }
-
-    // Now we steal `cluster->_sites`. Each site now belongs to a different
-    // magnetic cluster. This info has to be propagated to the `_system_state`.
-    for (auto const site : cluster->_sites) {
-        _system_state.set_magnetic_cluster(site, *this);
-    }
-    _sites.reserve(_sites.size() + cluster->_sites.size());
-    _sites.insert(end(_sites), begin(cluster->_sites), end(cluster->_sites));
-}
-
-auto magnetic_cluster_base_t::rotate(angle_t const angle) -> void
-{
-    dfs([angle, this](auto& x) {
-        using std::begin, std::end;
-        _system_state.rotate(begin(x._sites), end(x._sites), angle);
-    });
-}
-
-TCM_FORCEINLINE auto magnetic_cluster_base_t::detach(size_t const child_index)
-    -> child_conn_t
-{
-    using std::swap;
-    TCM_ASSERT(child_index < _children.size(), "index out of bounds");
-
-    if (child_index != _children.size() - 1) {
-        _children.back().data->_parent->index =
-            static_cast<uint32_t>(child_index);
-        swap(_children[child_index], _children.back());
-    }
-    auto conn = std::move(_children.back());
-    _children.pop_back();
-    conn.data->_parent = std::nullopt;
-    return conn;
-}
-
-TCM_FORCEINLINE auto move_root_down(magnetic_cluster_base_t::unique_ptr root,
-                                    size_t const child_index)
-    -> magnetic_cluster_base_t::unique_ptr
-{
-    using child_conn_t = magnetic_cluster_base_t::child_conn_t;
-    TCM_ASSERT(root->is_root(), "`root` must be the of the tree");
-    TCM_ASSERT(child_index < root->_children.size(), "index out of bounds");
-
-    // Remove `child_index` from `root`'s list of children
-    auto [edge, new_root] = root->detach(child_index);
-    // Construct the new connection with the direction inverted.
-    auto conn = child_conn_t{/*edge=*/{edge.second, edge.first},
-                             /*data=*/std::move(root)};
-    // Attach it to the new root
-    new_root->attach(std::move(conn));
-    TCM_ASSERT(root == nullptr, "post-condition violated");
-    TCM_ASSERT(new_root->is_root(), "post-condition violated");
-    return std::move(new_root);
-}
-// ================ }}}
-
-template <>
-auto thread_local_pool<magnetic_cluster_base_t>() noexcept -> boost::pool<>&
-{
-    thread_local boost::pool<> pool{sizeof(magnetic_cluster_base_t)};
-    return pool;
-}
 
 #if 0
 
