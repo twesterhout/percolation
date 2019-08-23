@@ -35,11 +35,12 @@ auto main() -> int
         stats.insert(151, &cs[5]);
         stats.insert(12, &cs[2]);
         stats.insert(16, &cs[6]);
+        stats.insert(121, &cs[2]);
 
         for (auto const& x : stats) {
             std::printf("%li: [", x.cluster - cs.data());
             for (auto i : x.neighbours) {
-                std::printf("%zu, ", i);
+                std::printf("%u, ", i);
             }
             std::printf("]\n");
         }

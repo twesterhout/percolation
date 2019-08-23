@@ -105,11 +105,11 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
         return (value + (Alignment - 1U)) & ~(Alignment - 1U);
     }
 
-    static constexpr auto capacity = round_up<32U / sizeof(void*)>(N);
+    static constexpr auto capacity = round_up<64U / sizeof(void*)>(N);
 
   private:
     alignas(64) std::array<cluster_type*, capacity> _clusters;
-    alignas(32) std::array<size_t, capacity> _sites;
+    alignas(32) std::array<uint32_t, capacity> _sites;
     bool     _still_searching;
     unsigned _size;
 
@@ -118,11 +118,11 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
     friend struct const_iterator_t;
 
     template <int64_t value, class T>
-    static auto reset_array(std::array<T, capacity>& xs) noexcept -> void
+    static auto reset_array(std::array<T*, capacity>& xs) noexcept -> void
     {
         constexpr auto alignment   = 32UL; // Alignment for AVX;
         constexpr auto vector_size = 4;
-        TCM_ASSERT(reinterpret_cast<uintptr_t>(xs.data()) % alignment == 0,
+        TCM_ASSERT(boost::alignment::is_aligned(xs.data(), alignment),
                    "array is not aligned.");
         static_assert(capacity % vector_size == 0);
         auto const a = _mm256_set1_epi64x(value);
@@ -130,20 +130,29 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
         for (auto i = 0U; i < capacity / vector_size; ++i, ++p) {
             _mm256_store_si256(p, a);
         }
-        TCM_ASSERT(
-            std::all_of(xs.begin(), xs.end(),
-                        [](auto x) {
-                            if constexpr (std::is_integral<T>::value) {
-                                return x == static_cast<T>(value);
-                            }
-                            else if constexpr (std::is_pointer<T>::value) {
-                                return reinterpret_cast<int64_t>(x) == value;
-                            }
-                            else {
-                                static_assert(!std::is_same<T, T>::value);
-                            }
-                        }),
-            "reset_array is broken");
+        TCM_ASSERT(std::all_of(xs.begin(), xs.end(),
+                               [](auto x) {
+                                   return reinterpret_cast<int64_t>(x) == value;
+                               }),
+                   "reset_array is broken");
+    }
+
+    template <uint32_t value>
+    static auto reset_array(std::array<uint32_t, capacity>& xs) noexcept -> void
+    {
+        constexpr auto alignment   = 32UL; // Alignment for AVX;
+        constexpr auto vector_size = 8;
+        TCM_ASSERT(boost::alignment::is_aligned(xs.data(), alignment),
+                   "array is not aligned.");
+        static_assert(capacity % vector_size == 0);
+        auto const a = _mm256_set1_epi32(static_cast<int32_t>(value));
+        auto*      p = reinterpret_cast<__m256i*>(xs.data());
+        for (auto i = 0U; i < capacity / vector_size; ++i, ++p) {
+            _mm256_store_si256(p, a);
+        }
+        TCM_ASSERT(std::all_of(xs.begin(), xs.end(),
+                               [](auto x) { return x == value; }),
+                   "reset_array is broken");
     }
 
   public:
@@ -174,13 +183,13 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
     auto reset() TCM_NOEXCEPT
     {
         reset_array<0>(_clusters);
-        reset_array<~0>(_sites);
+        reset_array<std::numeric_limits<uint32_t>::max()>(_sites);
         _still_searching = true;
         _size            = 0;
     }
 
     /// Adds neighbour `i`
-    auto insert(size_t const i, cluster_type* const cluster) TCM_NOEXCEPT
+    auto insert(uint32_t const i, cluster_type* const cluster) TCM_NOEXCEPT
         -> void
     {
         TCM_ASSERT(cluster != nullptr, "`cluster` should not be nullptr");
@@ -203,8 +212,8 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
   private:
     struct const_iterator_t {
         struct value_type {
-            cluster_type*           cluster;
-            gsl::span<size_t const> neighbours;
+            cluster_type*             cluster;
+            gsl::span<uint32_t const> neighbours;
         };
         using reference         = value_type const&;
         using pointer           = value_type const*;
@@ -232,7 +241,7 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
                     _todo[i]        = false;
                 }
             }
-            _value.neighbours = gsl::span<size_t const>{_sites.data(), count};
+            _value.neighbours = gsl::span<uint32_t const>{_sites.data(), count};
         }
 
       public:
@@ -335,7 +344,7 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
       private:
         neighbour_stats_t const* _obj;
         value_type               _value;
-        std::array<size_t, N>    _sites;
+        std::array<uint32_t, N>  _sites;
         std::array<bool, N>      _todo;
     };
 
@@ -343,7 +352,7 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
     {
         using std::begin, std::end;
         return static_cast<unsigned>(
-            std::find(begin(_clusters), end(_clusters), cluster)
+            std::find(begin(_clusters), begin(_clusters) + N, cluster)
             - begin(_clusters));
     }
 };

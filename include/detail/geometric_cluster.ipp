@@ -202,4 +202,11 @@ auto geometric_cluster_base_t::form_cycle(magnetic_cluster_base_t& left,
     }
 }
 
+template <>
+auto thread_local_pool<geometric_cluster_base_t>() noexcept -> boost::pool<>&
+{
+    thread_local boost::pool<> pool{sizeof(geometric_cluster_base_t)};
+    return pool;
+}
+
 TCM_NAMESPACE_END
