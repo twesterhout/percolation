@@ -54,6 +54,7 @@ using size_t = std::size_t;
 struct no_optimize_t {};
 inline constexpr no_optimize_t no_optimize{};
 
+#if 0
 /// Let the direction of spin on site `site` be `x`. Denote the spins on the
 /// nearest neighbours of `x` by `{αᵢ}`. Furthermore, let `cᵢ = +1` if
 /// interaction between sites is antiferromagnetic and `cᵢ = -1` if interaction
@@ -156,6 +157,7 @@ auto minimise_local_energy(size_t const site, System const& system) -> angle_t
         return angle_t{0.0f};
     }
 }
+#endif
 
 class system_base_t;
 
@@ -245,7 +247,7 @@ struct magnetic_cluster_base_t {
     /// The merging is done in two steps:
     ///   -# stealing all the *children* from \p cluster, and
     ///   -# stealing all the *sites* from \p cluster.
-    inline auto merge(unique_ptr cluster) -> void;
+    TCM_FORCEINLINE auto merge(unique_ptr cluster) -> void;
 
     /// Rotates the subtree (i.e. `*this` and all the children recursively) by
     /// \p angle.

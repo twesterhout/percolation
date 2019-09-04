@@ -47,6 +47,26 @@ TCM_FORCEINLINE geometric_cluster_base_t::geometric_cluster_base_t(
         .on_boundaries_changed(*this);
 }
 
+geometric_cluster_base_t::~geometric_cluster_base_t() noexcept
+{
+    _system_state.on_cluster_destroyed(*this);
+}
+
+constexpr auto geometric_cluster_base_t::size() const noexcept -> uint32_t
+{
+    return _size;
+}
+
+constexpr auto geometric_cluster_base_t::boundaries() const noexcept -> int
+{
+    return _boundaries;
+}
+
+constexpr auto geometric_cluster_base_t::root_index() const noexcept -> uint32_t
+{
+    return _root_index;
+}
+
 // WARNING: !!! This invalidates the _root_index !!!
 auto geometric_cluster_base_t::invert(magnetic_cluster_base_t& new_root) -> void
 {
@@ -104,6 +124,24 @@ geometric_cluster_base_t::merge(std::pair<uint32_t, uint32_t> edge,
         .on_cluster_merged(*this, other);
 }
 
+auto geometric_cluster_base_t::merge(
+    std::pair<magnetic_cluster_base_t&, magnetic_cluster_base_t&> edge,
+    geometric_cluster_base_t&                                     other) -> void
+{
+    auto& [this_cluster, other_cluster] = edge;
+    // Prepare the `other` cluster
+    other.invert(other_cluster);
+    // Attach it to `*this`.
+    this_cluster.merge(std::move(other._root));
+    _size += other._size;
+    _boundaries |= other._boundaries;
+    // Update global statistics
+    _system_state.on_size_changed(*this)
+        .on_boundaries_changed(*this)
+        // NOTE: This call destroys `other`
+        .on_cluster_merged(*this, other);
+}
+
 namespace detail {
 TCM_FORCEINLINE auto path_to_root(magnetic_cluster_base_t& node)
 {
@@ -152,11 +190,6 @@ inline auto find_lca_impl(magnetic_cluster_base_t& left,
         TCM_ASSERT(common == std::addressof(right), "");
         TCM_ASSERT(!path_left.empty(), "");
     }
-    else {
-        TCM_ASSERT(!path_left.empty(), "");
-        TCM_ASSERT(!path_right.size(), "");
-    }
-
     return std::make_tuple(common, std::move(path_left), std::move(path_right));
 }
 } // namespace detail
@@ -205,7 +238,14 @@ auto geometric_cluster_base_t::form_cycle(magnetic_cluster_base_t& left,
 template <>
 auto thread_local_pool<geometric_cluster_base_t>() noexcept -> boost::pool<>&
 {
+#if defined(TCM_CLANG)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wexit-time-destructors"
+#endif
     thread_local boost::pool<> pool{sizeof(geometric_cluster_base_t)};
+#if defined(TCM_CLANG)
+#    pragma clang diagnostic pop
+#endif
     return pool;
 }
 

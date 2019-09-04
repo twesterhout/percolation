@@ -125,7 +125,10 @@ auto magnetic_cluster_base_t::rotate(angle_t const angle) -> void
 {
     dfs([angle, this](auto& x) {
         using std::begin, std::end;
-        _system_state.rotate(begin(x._sites), end(x._sites), angle);
+        std::for_each(begin(x._sites), end(x._sites),
+                      [angle, this](auto const site) {
+                          _system_state.rotate(site, angle);
+                      });
     });
 }
 
@@ -185,6 +188,27 @@ auto magnetic_cluster_base_t::number_children() const noexcept -> size_t
     return _children.size();
 }
 
+template <class Function>
+auto magnetic_cluster_base_t::dfs(Function&& fn) -> void
+{
+    using container_type =
+        boost::container::small_vector<magnetic_cluster_base_t*, 29>;
+    using stack_type = std::stack<magnetic_cluster_base_t*, container_type>;
+    static_assert(sizeof(stack_type) == sizeof(container_type),
+                  "std::stack is wasting memory");
+
+    stack_type todo;
+    todo.push(this);
+    while (!todo.empty()) {
+        auto& x = *todo.top();
+        todo.pop();
+        for (auto& child : x._children) {
+            todo.push(child.data.get());
+        }
+        fn(x);
+    }
+}
+
 auto move_root_down(magnetic_cluster_base_t::unique_ptr root,
                     size_t const                        child_index)
     -> magnetic_cluster_base_t::unique_ptr
@@ -208,7 +232,14 @@ auto move_root_down(magnetic_cluster_base_t::unique_ptr root,
 template <>
 auto thread_local_pool<magnetic_cluster_base_t>() noexcept -> boost::pool<>&
 {
+#if defined(TCM_CLANG)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wexit-time-destructors"
+#endif
     thread_local boost::pool<> pool{sizeof(magnetic_cluster_base_t)};
+#if defined(TCM_CLANG)
+#    pragma clang diagnostic pop
+#endif
     return pool;
 }
 

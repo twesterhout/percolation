@@ -42,7 +42,7 @@ constexpr auto particle_base_t::destroy() noexcept -> void
 
 inline auto find_root(particle_base_t& particle) -> particle_base_t&
 {
-    TCM_ASSERT(particle.is_child(), "site is empty");
+    TCM_ASSERT(!particle.is_empty(), "site is empty");
     using pointer_type = gsl::not_null<particle_base_t*>;
     using vector_type  = boost::container::static_vector<pointer_type, 16 - 1>;
 

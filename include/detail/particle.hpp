@@ -119,10 +119,7 @@ struct particle_base_t {
         return *this;
     }
 
-    /// Constructs a new particle given its parent index.
-    ///
-    /// \param parent_index Index of the parent site.
-    /// \noexcept
+    /// Constructs a new particle given its parent.
     explicit particle_base_t(gsl::not_null<particle_base_t*> parent)
         TCM_NOEXCEPT : _raw{-reinterpret_cast<intptr_t>(parent.get())}
     {

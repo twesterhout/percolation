@@ -51,15 +51,18 @@ struct free_deleter_t {
 
 using FreeDeleter = free_deleter_t;
 
-template <class T, std::size_t Alignment = 64>
-auto make_buffer_of(std::size_t const n) -> std::unique_ptr<T[], FreeDeleter>
+template <class T, size_t Alignment = 64>
+auto make_buffer_of(size_t const n) -> std::unique_ptr<T[], FreeDeleter>
 {
     static_assert(Alignment > 0 && ((Alignment - 1) & Alignment) == 0,
                   "Invalid alignment.");
+    if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
+        throw std::overflow_error{"integer overflow in make_buffer_of"};
+    }
     auto* p =
         reinterpret_cast<T*>(std::aligned_alloc(Alignment, sizeof(T) * n));
     if (p == nullptr) { throw std::bad_alloc{}; }
-    return {p, FreeDeleter{}};
+    return {p, free_deleter_t{}};
 }
 
 template <class T> using tcm_unique_ptr = std::unique_ptr<T, FreeDeleter>;
@@ -243,7 +246,8 @@ struct angle_t {
         // if (angle < 0 || angle >= detail::two_pi) {
         //     std::fprintf(stderr, "angle_t{%f}\n", static_cast<double>(angle));
         // }
-        TCM_ASSERT((0 <= angle && angle < detail::two_pi<float>),
+        TCM_ASSERT(std::isnan(angle)
+                       || (0 <= angle && angle < detail::two_pi<float>),
                    "Angle out of domain");
     }
 

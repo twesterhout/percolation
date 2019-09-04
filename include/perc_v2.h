@@ -48,6 +48,18 @@ struct _tcm_percolation_results {
     double* magnetisation;
 };
 
+struct _tcm_perc_results {
+    uint32_t        size;
+    uint32_t const* number_sites;
+    uint32_t*       number_clusters;
+    uint32_t*       max_cluster_size;
+    uint8_t*        has_wrapped_one;
+    uint8_t*        has_wrapped_two;
+    double*         chirality;
+    double*         helicity;
+    double*         magnetisation;
+};
+
 struct _tcm_percolation_stats {
     double* max_magnetic_cluster_size;
     double* mean_magnetic_cluster_size;
@@ -55,22 +67,41 @@ struct _tcm_percolation_stats {
     double* mean_number_children;
 };
 
+struct _tcm_random_number_generator;
+
 #if defined(__cplusplus)
-using tcm_percolation_results_t = _tcm_percolation_results;
-using tcm_percolation_stats_t   = _tcm_percolation_stats;
+using tcm_perc_results_t            = _tcm_perc_results;
+using tcm_percolation_results_t     = _tcm_percolation_results;
+using tcm_percolation_stats_t       = _tcm_percolation_stats;
+using tcm_random_number_generator_t = _tcm_random_number_generator;
 #else
-typedef struct _tcm_percolation_results tcm_percolation_results_t;
-typedef struct _tcm_percolation_stats   tcm_percolation_stats_t;
+typedef struct _tcm_perc_results            tcm_perc_results_t;
+typedef struct _tcm_percolation_results     tcm_percolation_results_t;
+typedef struct _tcm_percolation_stats       tcm_percolation_stats_t;
+typedef struct _tcm_random_number_generator tcm_random_number_generator_t;
 #endif
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
+/// Allocates and constructs a new random number generator.
+///
+/// \param seed Seed to use for initialisation.
+tcm_random_number_generator_t* tcm_random_number_generator_init(unsigned seed);
+/// Destructs the random number generator and frees the memory.
+void tcm_random_number_generator_deinit(tcm_random_number_generator_t* rng);
+
+int tcm_percolate_square(tcm_square_lattice_t const*, tcm_perc_results_t const*,
+                         tcm_percolation_stats_t const*,
+                         tcm_random_number_generator_t*);
+
+#if 0
 TCM_EXPORT
 int tcm_percolate_square(size_t, size_t, tcm_square_lattice_t,
                          tcm_percolation_results_t const*,
                          tcm_percolation_stats_t const*);
+#endif
 
 TCM_EXPORT int tcm_percolate_cubic(tcm_cubic_lattice_t,
                                    tcm_percolation_results_t const*);

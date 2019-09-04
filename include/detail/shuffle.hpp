@@ -28,7 +28,7 @@
 
 #pragma once
 
-#include "config.h"
+#include "detail/utility.hpp"
 #include <gsl/gsl-lite.hpp>
 #include <random>
 #include <type_traits>
@@ -168,5 +168,28 @@ template <class T, class Generator> class shuffler_t {
 
 template <class T, class Generator>
 shuffler_t(gsl::span<T>, Generator&)->shuffler_t<T, Generator>;
+
+template <class Generator>
+auto make_stateful_shuffler(uint32_t const number_sites, Generator& generator)
+{
+    using buffer_t =
+        decltype(make_buffer_of<uint32_t>(std::declval<uint32_t>()));
+    using shuffler_t = shuffler_t<uint32_t, Generator>;
+
+    class stateful_shuffler_t : public shuffler_t {
+        buffer_t _buffer;
+
+      public:
+        stateful_shuffler_t(buffer_t&& buffer, uint32_t const size,
+                            Generator& generator)
+            : shuffler_t{gsl::span<uint32_t>{buffer.get(), size}, generator}
+            , _buffer{std::move(buffer)}
+        {
+            std::iota(_buffer.get(), _buffer.get() + size, 0U);
+        }
+    };
+    return stateful_shuffler_t{make_buffer_of<uint32_t>(number_sites),
+                               number_sites, generator};
+}
 
 TCM_NAMESPACE_END

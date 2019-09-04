@@ -98,7 +98,7 @@ class geometric_cluster_base_t { // {{{
     /// Inverts the tree such that \p cluster becomes the new root. If \p
     /// cluster is already root, nothing's done.
     ///
-    /// \param cluster The new root. It must belong to `*this`.
+    /// \param new_root The new root. It must belong to `*this`.
     auto invert(magnetic_cluster_base_t& new_root) -> void;
 
   public:
@@ -113,6 +113,10 @@ class geometric_cluster_base_t { // {{{
     /// reference to it is undefined behaviour.
     inline auto merge(std::pair<uint32_t, uint32_t> edge,
                       geometric_cluster_base_t&     other) -> void;
+
+    inline auto
+    merge(std::pair<magnetic_cluster_base_t&, magnetic_cluster_base_t&> edge,
+          geometric_cluster_base_t& other) -> void;
 
     /// Connects \p left and \p right forming a cycle in the graph. All magnetic
     /// clusters belonging to this cycle are merged into one.

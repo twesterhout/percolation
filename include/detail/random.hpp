@@ -28,14 +28,19 @@
 
 #pragma once
 
-#include "config.h"
-#include "utility.hpp"
-#include <mkl_vsl.h>
+#include "perc_v2.h"
+
+#include <pcg_random.hpp>
+
 #include <memory>
-#include <random>
+
+struct _tcm_random_number_generator : public pcg32 {
+    using pcg32::pcg32;
+};
 
 TCM_NAMESPACE_BEGIN
 
+#if 0
 using std::int32_t;
 using random_generator_t = std::mt19937;
 
@@ -43,14 +48,13 @@ auto random_generator() noexcept -> random_generator_t&;
 
 auto random_stream() -> VSLStreamStatePtr;
 
-#if 0
 auto make_rng_stream(MKL_INT method, MKL_UINT seed)
     -> std::unique_ptr<VSLStreamStatePtr, vsl_stream_deleter_t>;
 
 auto make_rng_stream(MKL_INT method)
     -> std::unique_ptr<VSLStreamStatePtr, vsl_stream_deleter_t>;
-#endif
 
 auto enumerate_sites(size_t const n) -> std::unique_ptr<int32_t[], FreeDeleter>;
+#endif
 
 TCM_NAMESPACE_END

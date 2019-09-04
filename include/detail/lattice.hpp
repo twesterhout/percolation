@@ -65,6 +65,19 @@ constexpr auto update_has_wrapped(bool (&has_wrapped)[3],
     if ((boundaries & z_mask) == z_mask) { has_wrapped[2] = true; }
 }
 
+namespace detail {
+constexpr auto update_has_wrapped(std::array<bool, 3>& has_wrapped,
+                                  int const boundaries) noexcept -> void
+{
+    constexpr auto x_mask = TCM_BOUNDARY_X_LOW | TCM_BOUNDARY_X_HIGH;
+    constexpr auto y_mask = TCM_BOUNDARY_Y_LOW | TCM_BOUNDARY_Y_HIGH;
+    constexpr auto z_mask = TCM_BOUNDARY_Z_LOW | TCM_BOUNDARY_Z_HIGH;
+    if ((boundaries & x_mask) == x_mask) { has_wrapped[0] = true; }
+    if ((boundaries & y_mask) == y_mask) { has_wrapped[1] = true; }
+    if ((boundaries & z_mask) == z_mask) { has_wrapped[2] = true; }
+}
+} // namespace detail
+
 /// Returns the number of sites in the \p lattice.
 ///
 /// \noexcept

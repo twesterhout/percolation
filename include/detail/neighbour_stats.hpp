@@ -158,10 +158,11 @@ template <class Cluster, size_t N> struct alignas(64) neighbour_stats_t {
   public:
     neighbour_stats_t() TCM_NOEXCEPT { reset(); }
 
-    neighbour_stats_t(neighbour_stats_t const&) = delete;
-    neighbour_stats_t(neighbour_stats_t&&)      = delete;
+    neighbour_stats_t(neighbour_stats_t const&)               = delete;
+    constexpr neighbour_stats_t(neighbour_stats_t&&) noexcept = default;
     neighbour_stats_t& operator=(neighbour_stats_t const&) = delete;
-    neighbour_stats_t& operator=(neighbour_stats_t&&) = delete;
+    constexpr neighbour_stats_t&
+    operator=(neighbour_stats_t&&) noexcept = delete;
 
     /// Returns the number of magnetic clusters to which we are connected.
     [[nodiscard]] constexpr auto size() const noexcept -> unsigned

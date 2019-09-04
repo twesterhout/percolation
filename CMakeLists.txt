@@ -115,7 +115,9 @@ if(NOT TARGET gsl::gsl-lite)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} submodule update --init -- third_party/gsl-lite
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    add_subdirectory(third_party/gsl-lite)
+    add_library(gsl-lite INTERFACE)
+    target_include_directories(gsl-lite INTERFACE third_party/gsl-lite/include)
+    add_library(gsl::gsl-lite ALIAS gsl-lite)
 endif()
 
 if(TRUE)
@@ -123,7 +125,7 @@ if(TRUE)
         COMMAND ${GIT_EXECUTABLE} submodule update --init -- third_party/pcg-cpp
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     add_library(pcg INTERFACE)
-    target_include_directories(pcg SYSTEM INTERFACE third_party/pcg/include)
+    target_include_directories(pcg SYSTEM INTERFACE third_party/pcg-cpp/include)
 endif()
 
 function(setup_percolation_target MY_TARGET)
@@ -143,9 +145,37 @@ function(setup_percolation_target MY_TARGET)
     endif()
 endfunction()
 
-add_library(percolation SHARED
+
+set(percolation_HEADERS
+    include/detail/geometric_cluster.hpp
+    include/detail/geometric_cluster.ipp
+    include/detail/lattice.hpp
+    include/detail/magnetic_cluster.hpp
+    include/detail/magnetic_cluster.ipp
+    include/detail/memory.hpp
+    include/detail/neighbour_stats.hpp
+    include/detail/particle.hpp
+    include/detail/particle.ipp
+    include/detail/shuffle.hpp
+    include/detail/system_state.hpp
+    include/detail/system_state.ipp
+    include/detail/utility.hpp
+    include/config.h
+    include/convolution.h
+    include/lattice.h
+    include/perc_v2.h
+)
+
+set(percolation_SOURCES
     src/convolution.cpp
     src/lattice.c
+    src/random.cpp
+    src/perc_v3.cpp
+)
+
+add_library(percolation SHARED
+    ${percolation_HEADERS}
+    ${percolation_SOURCES}
 )
 target_include_directories(percolation PUBLIC include)
 setup_percolation_target(percolation)
@@ -160,10 +190,19 @@ else()
         gsl_CONFIG_CONTRACT_LEVEL_OFF=1)
     message(STATUS "[lbfgs-cpp] Disabling gsl-lite contracts")
 endif()
+set_target_properties(percolation
+    PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 if(BUILD_TESTING)
     add_subdirectory(test)
 endif()
+
+install(TARGETS percolation
+            LIBRARY
+            DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Percolation
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE
+                        WORLD_READ WORLD_EXECUTE)
 
 if (FALSE)
     add_library(Common INTERFACE)
